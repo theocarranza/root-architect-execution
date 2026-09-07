@@ -1,0 +1,16 @@
+{
+  "id": "impl-executor",
+  "role": "implementer",
+  "description": "Executes one implementation step from one brief under test-driven development. Edits only the paths the brief names, runs only the commands it names, and returns the implementer report as a single fenced JSON block. Dispatched by a root architect; never commits, never spawns agents, never contacts the owner.",
+  "mutation": "write-scoped",
+  "model": { "default": "cheap", "escalation": ["mid", "strong"] },
+  "reasoning": { "default": "low", "escalation": ["medium", "high"] },
+  "tools": {
+    "allow": ["read-files", "search-files", "edit-files", "create-files", "run-commands"],
+    "deny": ["delegate"],
+    "shell_purpose": "Run the brief's acceptance commands to observe RED and then GREEN counts. Not for Git, not for installs, not for exploration."
+  },
+  "must_not": ["commit", "stage", "spawn-agents", "widen-scope", "ask-owner", "handoff-to-peer"],
+  "returns": "implementer-report.schema.json",
+  "prose": "references/agents/impl-executor.md"
+}

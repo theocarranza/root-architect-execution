@@ -1,0 +1,78 @@
+{
+  "host": "claude-code",
+  "verified_on": "2026-09-07",
+  "source": "https://code.claude.com/docs/en/sub-agents (frontmatter field reference) plus `claude --help` and the agent spawn option keys {schema, model, effort, isolation, agentType, disallowedTools, bashCommandClamp} read from the 2.1.234 binary.",
+  "agent_dir": "agents",
+  "bundled_dir": "agents",
+  "root_placeholder": "${CLAUDE_PLUGIN_ROOT}",
+  "format": "markdown-yaml",
+  "required_fields": [
+    "name",
+    "description"
+  ],
+  "tool_map": {
+    "read-files": [
+      "Read"
+    ],
+    "search-files": [
+      "Grep",
+      "Glob"
+    ],
+    "edit-files": [
+      "Edit"
+    ],
+    "create-files": [
+      "Write"
+    ],
+    "run-commands": [
+      "Bash"
+    ],
+    "delegate": [
+      "Agent"
+    ]
+  },
+  "model_map": {
+    "cheap": "haiku",
+    "mid": "sonnet",
+    "strong": "opus"
+  },
+  "effort_map": {
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "max"
+  },
+  "capabilities": {
+    "explicit_model": {
+      "supported": true,
+      "field": "model",
+      "verified": "Documented values sonnet/opus/haiku/fable, a full model id, or inherit. Resolution order is per-invocation parameter, then frontmatter, then CLAUDE_CODE_SUBAGENT_MODEL, then the parent's model \u2014 so an unset field inherits and must never be left unset."
+    },
+    "reasoning_effort": {
+      "supported": true,
+      "field": "effort",
+      "verified": "Documented frontmatter field taking low/medium/high/xhigh/max, overriding the session effort level. `claude --help` exposes the matching --effort <level> session flag, and `effort` appears among the agent spawn option keys in the 2.1.234 binary. This corrects the previous revision, which asserted effort was unsettable here."
+    },
+    "tool_allowlist": {
+      "supported": true,
+      "field": "tools",
+      "verified": "Documented frontmatter field; omitting it inherits every available tool, so it is always written explicitly."
+    },
+    "tool_denylist": {
+      "supported": true,
+      "field": "disallowedTools",
+      "verified": "Documented frontmatter field, resolved before `tools`: denials are removed from the pool first, then the allowlist applies to what remains."
+    },
+    "read_only_enforced": {
+      "supported": true,
+      "field": "tools",
+      "verified": "Enforced by the host, not by instruction: an agent whose `tools` omits Edit, Write and NotebookEdit has no write tool to call. The paired `disallowedTools` entry is belt-and-braces against a later inherited grant."
+    },
+    "scoped_hooks": {
+      "supported": true,
+      "field": "hooks",
+      "verified": "Documented frontmatter field carrying a hook configuration scoped to that subagent. This plugin instead uses session-wide hooks keyed on the agent_type field that PreToolUse payloads carry inside subagents, so one hook file covers agents this plugin did not generate."
+    }
+  }
+}

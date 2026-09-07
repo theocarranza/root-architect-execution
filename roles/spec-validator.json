@@ -1,0 +1,15 @@
+{
+  "id": "spec-validator",
+  "role": "spec-validator",
+  "description": "Read-only plan-compliance validator. Judges whether delivered code matches what the governing plan requires, before any quality review, and returns the validator verdict as a single fenced JSON block. Fixes nothing and runs nothing; dispatched by a root architect.",
+  "mutation": "read-only",
+  "model": { "default": "cheap", "escalation": ["mid"] },
+  "reasoning": { "default": "medium", "escalation": ["high"] },
+  "tools": {
+    "allow": ["read-files", "search-files"],
+    "deny": ["edit-files", "create-files", "run-commands", "delegate"]
+  },
+  "must_not": ["commit", "stage", "spawn-agents", "widen-scope", "ask-owner", "edit-files", "run-commands", "handoff-to-peer"],
+  "returns": "validator-verdict.schema.json",
+  "prose": "references/agents/spec-validator.md"
+}

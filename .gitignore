@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+
+# Runtime dispatch state; belongs to a workspace being driven, never to this repo.
+.root-architect/

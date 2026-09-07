@@ -1,0 +1,17 @@
+{
+  "name": "root-architect-execution",
+  "owner": {
+    "name": "Théo Carranza"
+  },
+  "metadata": {
+    "description": "Root-architect execution protocol for Claude Code: a root session keeps the plan, Git and the ledger while schema-declared isolated workers implement and review."
+  },
+  "plugins": [
+    {
+      "name": "root-architect-execution",
+      "source": "./",
+      "description": "Run an implementation plan from a root session that never writes product code. Three worker roles — implementer, plan-compliance validator, quality validator — are declared once as JSON manifests carrying model tier, reasoning strength, tool grant and read-only status, then generated into per-host agent files with honest disclosures for whatever the host cannot enforce. Two PreToolUse hooks enforce what the prose only asked for: root cannot edit a path it has delegated, and workers cannot touch Git.",
+      "version": "0.1.0"
+    }
+  ]
+}

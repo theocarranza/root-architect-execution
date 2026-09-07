@@ -1,0 +1,70 @@
+{
+  "host": "cursor",
+  "verified_on": "2026-09-04",
+  "source": "INHERITED, NOT RE-VERIFIED. Carried from the orchestration-quality-control host capability matrix dated 2026-09-04 and its shipped .cursor agent files. The Claude row of that same matrix was found wrong on 2026-09-07, so re-verify against Cursor's own documentation before relying on a disclosure produced from these rows.",
+  "agent_dir": ".cursor/agents",
+  "bundled_dir": "dist/cursor",
+  "format": "markdown-yaml",
+  "required_fields": [],
+  "tool_map": {
+    "read-files": [
+      "read"
+    ],
+    "search-files": [
+      "search"
+    ],
+    "edit-files": [
+      "edit"
+    ],
+    "create-files": [
+      "edit"
+    ],
+    "run-commands": [
+      "terminal"
+    ]
+  },
+  "model_map": {
+    "cheap": "claude-haiku-4-5",
+    "mid": "claude-sonnet-5",
+    "strong": "claude-opus-5"
+  },
+  "effort_map": {
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "high",
+    "max": "high"
+  },
+  "capabilities": {
+    "explicit_model": {
+      "supported": true,
+      "field": "model",
+      "verified": "Takes inherit or a model id; unset inherits, so it is always written."
+    },
+    "reasoning_effort": {
+      "supported": true,
+      "field": "model",
+      "verified": "Not a separate key: effort rides inside the model string as model-id[effort=level]. The renderer therefore writes one composite value, and effort_map folds xhigh and max onto high."
+    },
+    "tool_allowlist": {
+      "supported": false,
+      "field": null,
+      "verified": "No per-agent tool allowlist is documented. A tool grant renders as an instruction plus an unenforced disclosure."
+    },
+    "tool_denylist": {
+      "supported": false,
+      "field": null,
+      "verified": "No documented denylist key."
+    },
+    "read_only_enforced": {
+      "supported": true,
+      "field": "readonly",
+      "verified": "readonly: true is a host-enforced flag, not an instruction."
+    },
+    "scoped_hooks": {
+      "supported": false,
+      "field": null,
+      "verified": "No per-agent hook mechanism is documented."
+    }
+  }
+}
