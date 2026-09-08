@@ -8,6 +8,65 @@ It is the `root-architect-execution` skill plus the machinery the skill used to
 only describe: schema-declared agent roles, generated host agent files, and two
 PreToolUse hooks that enforce the two rules prose never managed to.
 
+## Install
+
+The plugin ships its own marketplace manifest, so installing is two commands:
+register the marketplace, then install from it.
+
+```bash
+# From a local clone
+claude plugin marketplace add /path/to/root-architect-execution
+claude plugin install root-architect-execution@root-architect-execution
+
+# Or straight from the repo
+claude plugin marketplace add <owner>/<repo>
+claude plugin install root-architect-execution@root-architect-execution
+```
+
+`--scope` decides who gets it: `user` (default, every project), `project`
+(committed to the repo you are in, so the team shares it), or `local` (this
+checkout only, uncommitted). It is accepted by both commands.
+
+**Restart Claude Code afterwards.** Skills and agents load on demand, but the two
+PreToolUse hooks are read at session start, so until you restart, the guards are
+installed and not enforcing.
+
+Verify:
+
+```bash
+claude plugin list                      # root-architect-execution, enabled, 0.1.1
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_roles.py"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" --host claude-code --check
+```
+
+The last two are the capability gate. They are worth running once after install:
+they confirm the three agent roles resolve on this host and that `agents/` still
+matches `roles/` and `hosts/`, which is the thing the protocol refuses to start
+without.
+
+### Updating
+
+```bash
+claude plugin update root-architect-execution
+```
+
+The install cache is **version-keyed** — `~/.claude/plugins/cache/root-architect-execution/root-architect-execution/<version>/`
+— and it is a copy, not a symlink. So editing a local clone changes nothing in an
+installed session: bump the version, reinstall or update, and restart. If the new
+version directory is not there, the update did not land.
+
+### Developing against a local clone
+
+`claude plugin marketplace add <path>` on a directory source points at the
+working tree rather than caching a copy of it, so a clone can serve as its own
+marketplace while you work on it. Two things still bite:
+
+- Hooks are read at session start, so hook changes need a restart regardless.
+- `.claude-plugin/plugin.json` and the entry in `.claude-plugin/marketplace.json`
+  each carry a version and they must agree. `plugin.json` wins at install time
+  and the marketplace entry is silently ignored, so drift is invisible until
+  something installs the wrong thing. `claude plugin validate .` catches it.
+
 ## Layout
 
 | Path | What it is |
