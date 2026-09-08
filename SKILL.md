@@ -96,7 +96,12 @@ been observed to pass.
    Findings from either go back to the same implementer.
 7. **Checkpoint gate.** Ledger updated, brief-owned paths staged,
    `git diff --cached --check` clean, one narrow commit.
-8. **Outcome gate.** The full recorded baseline, not targeted evidence.
+8. **Outcome gate.** The full recorded baseline, not targeted evidence — and
+   whatever else validates the *kind* of artifact the work touched. A test suite
+   only checks what it was written to check: a change to a manifest, a schema, a
+   lockfile, or generated output can leave every test green and still ship
+   broken. Name that validator in the acceptance commands rather than
+   discovering the gap afterwards.
 
 ## State
 

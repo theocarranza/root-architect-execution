@@ -3,3 +3,8 @@ __pycache__/
 
 # Runtime dispatch state; belongs to a workspace being driven, never to this repo.
 .root-architect/
+
+# Workspace session bookkeeping. The codex-workflows-plugin session gate
+# creates this at <cwd>/AI_Codex before it will allow writes; like
+# .root-architect/ above, it belongs to the workspace being driven, not here.
+AI_Codex/

@@ -83,7 +83,7 @@ marketplace while you work on it. Two things still bite:
 | `hooks/` | The two guards |
 | `tests/` | `python3 -m unittest discover -s tests -t .` |
 
-## The three commands root runs
+## The commands root runs
 
 ```bash
 # Capability gate — before dispatching anything
@@ -96,7 +96,24 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" open \
 # Return gate — before treating a worker's reply as a result
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/check_return.py" \
   --role implementer --file /tmp/return.txt --task "..." --attempt 1
+
+# Recovery — which state file is untrusted, and why
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" verify
 ```
+
+When contributing to *this* repo, the outcome gate is these three, and the last
+one is not optional:
+
+```bash
+python3 -m unittest discover -s tests -t .
+python3 scripts/render_agents.py --host claude-code --check
+claude plugin validate .
+```
+
+The tests do not read `.claude-plugin/`, so a manifest that disagrees with
+itself passes them cleanly. That has already happened once here: a version bump
+moved `plugin.json` and left the marketplace entry behind, and only
+`claude plugin validate` noticed.
 
 ## What the hooks enforce
 
