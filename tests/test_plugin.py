@@ -30,6 +30,28 @@ def run(script, args, stdin=None):
         input=stdin, capture_output=True, text=True)
 
 
+def make_corrupted_copy(tmp_dir, schema_name, contents, include_hooks=False):
+    """Build a scratch copy of scripts/ + schemas/ with one schema corrupted.
+
+    Returns the path to the copy's root directory so callers can locate
+    dispatch_state.py or hooks/root_write_guard.py inside it. Tests never
+    touch the real schemas/ directory this way. When contents is None, the
+    schema file is removed instead of corrupted, to exercise the missing-
+    sibling case.
+    """
+    copy_root = Path(tmp_dir) / "_repo_copy"
+    shutil.copytree(SCRIPTS, copy_root / "scripts")
+    shutil.copytree(ROOT / "schemas", copy_root / "schemas")
+    if include_hooks:
+        shutil.copytree(HOOKS, copy_root / "hooks")
+    target = copy_root / "schemas" / schema_name
+    if contents is None:
+        target.unlink()
+    else:
+        target.write_text(contents, encoding="utf-8")
+    return copy_root
+
+
 def valid_brief(**overrides):
     brief = {
         "task": "Task 3 — reject a tampered middle result",
@@ -470,22 +492,11 @@ class DispatchStateTests(unittest.TestCase):
         self.assertIn("ok open 20260907-task-1", result.stdout)
         self.assertIn("CORRUPT", result.stdout)
 
-    def make_corrupted_copy(self, schema_name, contents):
-        """Build a scratch copy of scripts/ + schemas/ with one schema corrupted.
-
-        Returns the path to dispatch_state.py inside the copy so tests never
-        touch the real schemas/ directory.
-        """
-        copy_root = Path(self.tmp.name) / "_repo_copy"
-        shutil.copytree(SCRIPTS, copy_root / "scripts")
-        shutil.copytree(ROOT / "schemas", copy_root / "schemas")
-        (copy_root / "schemas" / schema_name).write_text(contents, encoding="utf-8")
-        return copy_root / "scripts" / "dispatch_state.py"
-
     def test_active_fails_cleanly_when_schema_file_is_invalid_json(self):
         """A schema file that exists but is not valid JSON must not traceback."""
-        script = self.make_corrupted_copy(
-            "dispatch.schema.json", "not json at all")
+        copy_root = make_corrupted_copy(
+            self.tmp.name, "dispatch.schema.json", "not json at all")
+        script = copy_root / "scripts" / "dispatch_state.py"
         self.open_dispatch()
         result = run(script, ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
@@ -495,8 +506,47 @@ class DispatchStateTests(unittest.TestCase):
 
     def test_verify_reports_corrupt_when_schema_file_is_invalid_json(self):
         """verify must still exit 1 and report CORRUPT, not traceback."""
-        script = self.make_corrupted_copy(
-            "brief.schema.json", "{ this is not json")
+        copy_root = make_corrupted_copy(
+            self.tmp.name, "brief.schema.json", "{ this is not json")
+        script = copy_root / "scripts" / "dispatch_state.py"
+        self.open_dispatch()
+        result = run(script, ["verify", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("CORRUPT", result.stdout)
+
+    def test_active_names_sibling_schema_not_root_schema_when_corrupt(self):
+        """A corrupt SIBLING schema (brief.schema.json) must be named in the
+        error, not the root schema (dispatch.schema.json) that referenced it.
+        This is the regression test for the trap: the naive fix blames the
+        root schema because that is what _validate_dispatch was called with.
+        """
+        copy_root = make_corrupted_copy(
+            self.tmp.name, "brief.schema.json", "{ not json")
+        script = copy_root / "scripts" / "dispatch_state.py"
+        self.open_dispatch()
+        result = run(script, ["active", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("brief.schema.json", result.stderr)
+        self.assertNotIn("dispatch.schema.json", result.stderr)
+
+    def test_active_names_missing_sibling_schema(self):
+        """A missing sibling schema file must be named in the error."""
+        copy_root = make_corrupted_copy(
+            self.tmp.name, "brief.schema.json", None)
+        script = copy_root / "scripts" / "dispatch_state.py"
+        self.open_dispatch()
+        result = run(script, ["active", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("brief.schema.json", result.stderr)
+
+    def test_verify_reports_corrupt_when_sibling_schema_is_invalid_json(self):
+        """verify must still report CORRUPT and exit 1 for a corrupt sibling."""
+        copy_root = make_corrupted_copy(
+            self.tmp.name, "brief.schema.json", "{ not json")
+        script = copy_root / "scripts" / "dispatch_state.py"
         self.open_dispatch()
         result = run(script, ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
@@ -709,6 +759,36 @@ class RootWriteGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn(str(target), result.stderr)
         self.assertIn("verify", result.stderr)
+
+    def call_isolated_guard(self, copy_root):
+        payload = {"tool_name": "Edit", "cwd": str(self.workspace),
+                   "tool_input": {"file_path": "scripts/envelope.py"}}
+        return run(copy_root / "hooks" / "root_write_guard.py", [],
+                   stdin=json.dumps(payload))
+
+    def test_denies_on_open_dispatch_with_corrupt_sibling_schema(self):
+        """A corrupt sibling schema (brief.schema.json) must still deny with
+        exit 2, not escape as an unhandled exception and exit 1. This is the
+        regression test for the trap: SchemaError is not a ValueError, so a
+        naive fix that raises SchemaError from _resolve would escape every
+        handler up to this hook and let the write through with exit 1.
+        """
+        self.open_dispatch()
+        copy_root = make_corrupted_copy(
+            self.tmp.name, "brief.schema.json", "{ not json",
+            include_hooks=True)
+        result = self.call_isolated_guard(copy_root)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_denies_on_open_dispatch_with_missing_sibling_schema(self):
+        """A missing sibling schema must also deny with exit 2, not escape."""
+        self.open_dispatch()
+        copy_root = make_corrupted_copy(
+            self.tmp.name, "brief.schema.json", None, include_hooks=True)
+        result = self.call_isolated_guard(copy_root)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_denies_when_dispatch_state_cannot_be_imported(self):
         with tempfile.TemporaryDirectory() as isolated:

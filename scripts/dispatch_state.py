@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from jsonschema_mini import Validator  # noqa: E402
+from jsonschema_mini import SchemaError, Validator  # noqa: E402
 
 SCHEMAS = Path(__file__).resolve().parent.parent / "schemas"
 STATE_SUBDIR = Path(".root-architect") / "state"
@@ -52,10 +52,14 @@ def state_dir(workspace):
 def _validate_dispatch(data, schema_path):
     """Validate dispatch data against schema, raising DispatchStateError on failure.
 
-    Catches FileNotFoundError from missing schema files, and OSError/ValueError
-    (including json.JSONDecodeError, a ValueError subclass) from schema files
-    that exist but cannot be read or do not hold valid JSON, converting both
-    into DispatchStateError so the guard hooks see a consistent exception type.
+    Catches FileNotFoundError from a missing root schema file, OSError/ValueError
+    (including json.JSONDecodeError, a ValueError subclass) from a root schema
+    file that exists but cannot be read or does not hold valid JSON, and
+    SchemaError from a sibling $ref target (for example brief.schema.json,
+    referenced from dispatch.schema.json) that is missing or not valid JSON.
+    SchemaError already names the offending sibling file, so it is not the
+    root schema; converting all three into DispatchStateError gives the guard
+    hooks one consistent exception type regardless of which file failed.
     """
     try:
         return Validator(schema_path).validate(data)
@@ -64,6 +68,8 @@ def _validate_dispatch(data, schema_path):
     except (OSError, ValueError) as e:
         raise DispatchStateError(
             schema_path, ["schema file is not valid JSON: %s" % e])
+    except SchemaError as e:
+        raise DispatchStateError(e.path or schema_path, [str(e)])
 
 
 def active_dispatch(workspace):
