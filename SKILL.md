@@ -108,7 +108,13 @@ marker file, and both guard hooks re-read it on every call.
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" open  --brief /tmp/brief.json --run-id 20260907-task-3
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" active
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" close --run-id 20260907-task-3 --outcome accepted
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" verify
 ```
+
+`verify` reports every record in the state directory, including archived ones,
+and exits non-zero if any is corrupt. It is the command the guards' deny
+messages name, because a record they refuse to trust is one they will not act
+on until it is repaired or removed.
 
 Hand-offs carry resolved inputs, decisions, artifact paths, and hashes — not
 accumulated transcripts.
@@ -173,7 +179,11 @@ applied is a false claim about the run.
 ## Stop conditions
 
 - Block rather than fall back when a named role or its isolation is
-  unavailable.
+  unavailable. The same rule governs the dispatch state itself: a record that
+  cannot be read, parsed, or validated blocks root's writes rather than reading
+  as "no delegation open". Run `dispatch_state.py verify` to see which file is
+  at fault, then repair or remove it — the guards match write tools only, so
+  `Bash` stays available to recover with.
 - Stop on a malformed worker return after one corrective retry.
 - Never allow worker-to-worker handoff, a broadened tool grant, or unbounded
   retries.

@@ -44,9 +44,22 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/check_return.py" \
 **`root_write_guard.py`** refuses a root-session `Edit`/`Write` on a path the
 open dispatch owns. Root writing product code around a stalled worker is a
 failed delegation with the evidence trail deleted — no RED count, no diff for
-the validators, no attempt recorded. The guard is narrow: it fires only when a
-dispatch is open, only from the root session, and only on that dispatch's own
+the validators, no attempt recorded. The guard is narrow about what it protects:
+it fires only from the root session, and only on the open dispatch's own
 `write_paths`.
+
+It also fails closed on state it cannot trust. A dispatch record that is
+unreadable, unparseable, or structurally invalid blocks the write instead of
+reading as "no delegation open", and so does finding state files when
+`dispatch_state` cannot be imported at all — otherwise deleting `scripts/` would
+switch the guard off. The deny names the offending file and points at
+`dispatch_state.py verify`, which reports every record and exits non-zero if any
+is corrupt.
+
+Malformed *hook input* is the deliberate exception: it allows. A payload the
+guard cannot parse or make sense of is not evidence that a delegation is open,
+and blocking on it would break every write in every project that installs this
+plugin. Untrustworthy state denies; unreadable input allows.
 
 **`worker_git_guard.py`** refuses Git mutation inside a worker, refuses any
 shell at all inside the read-only validator, and refuses edits inside either
