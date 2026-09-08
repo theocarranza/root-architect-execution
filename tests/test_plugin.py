@@ -582,6 +582,151 @@ class RootWriteGuardTests(unittest.TestCase):
         result = run(HOOKS / "root_write_guard.py", [], stdin="not json")
         self.assertEqual(result.returncode, 0)
 
+    def test_survives_list_tool_input_without_blocking(self):
+        self.open_dispatch()
+        payload = {"tool_name": "Edit", "cwd": str(self.workspace),
+                   "tool_input": ["not", "a", "dict"]}
+        result = run(HOOKS / "root_write_guard.py", [], stdin=json.dumps(payload))
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_survives_string_tool_input_without_blocking(self):
+        self.open_dispatch()
+        payload = {"tool_name": "Edit", "cwd": str(self.workspace),
+                   "tool_input": "not a dict"}
+        result = run(HOOKS / "root_write_guard.py", [], stdin=json.dumps(payload))
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_survives_non_object_payload_without_blocking(self):
+        result = run(HOOKS / "root_write_guard.py", [], stdin=json.dumps([1, 2, 3]))
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def raw_call(self, payload):
+        return run(HOOKS / "root_write_guard.py", [],
+                   stdin=json.dumps(payload))
+
+    def test_survives_non_string_cwd_without_blocking(self):
+        self.open_dispatch()
+        result = self.raw_call({"tool_name": "Edit", "cwd": 42,
+                                "tool_input": {"file_path": "scripts/envelope.py"}})
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_survives_non_string_path_value_without_blocking(self):
+        self.open_dispatch()
+        result = self.raw_call({"tool_name": "Edit", "cwd": str(self.workspace),
+                                "tool_input": {"file_path": 42}})
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_survives_a_path_with_an_embedded_null_byte(self):
+        self.open_dispatch()
+        result = self.raw_call({"tool_name": "Edit", "cwd": str(self.workspace),
+                                "tool_input": {"file_path": "scripts/env\x00.py"}})
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_survives_an_unhashable_tool_name(self):
+        self.open_dispatch()
+        result = self.raw_call({"tool_name": ["Edit"], "cwd": str(self.workspace),
+                                "tool_input": {"file_path": "scripts/envelope.py"}})
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_no_payload_shape_produces_a_traceback(self):
+        """The invariant: every input exits 0 or 2, never with a traceback."""
+        self.open_dispatch()
+        shapes = [42, 4.5, True, None, [], {}, "", "a\x00b", ["x"], {"k": "v"}]
+        for shape in shapes:
+            for key in ("tool_name", "cwd", "agent_type", "tool_input"):
+                payload = {"tool_name": "Edit", "cwd": str(self.workspace),
+                           "tool_input": {"file_path": "scripts/envelope.py"}}
+                payload[key] = shape
+                with self.subTest(key=key, shape=shape):
+                    result = self.raw_call(payload)
+                    self.assertIn(result.returncode, (0, 2))
+                    self.assertNotIn("Traceback", result.stderr)
+            for key in ("file_path", "notebook_path", "path"):
+                payload = {"tool_name": "Edit", "cwd": str(self.workspace),
+                           "tool_input": {key: shape}}
+                with self.subTest(key=key, shape=shape):
+                    result = self.raw_call(payload)
+                    self.assertIn(result.returncode, (0, 2))
+                    self.assertNotIn("Traceback", result.stderr)
+
+    def state_dir(self):
+        directory = self.workspace / ".root-architect" / "state"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def test_denies_on_unparseable_state_file(self):
+        directory = self.state_dir()
+        (directory / "dispatch-broken.json").write_bytes(b"\xff\xfe not json")
+        result = self.call()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("verify", result.stderr)
+
+    def test_denies_on_open_dispatch_missing_brief(self):
+        directory = self.state_dir()
+        record = {"schema_version": 1, "run_id": "x", "status": "open",
+                   "opened_at": "2026-01-01T00:00:00+00:00"}
+        (directory / "dispatch-x.json").write_text(
+            json.dumps(record), encoding="utf-8")
+        result = self.call()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("verify", result.stderr)
+
+    def test_denies_on_brief_missing_task(self):
+        directory = self.state_dir()
+        brief = valid_brief()
+        del brief["task"]
+        record = {"schema_version": 1, "run_id": "x", "status": "open",
+                   "opened_at": "2026-01-01T00:00:00+00:00", "brief": brief}
+        (directory / "dispatch-x.json").write_text(
+            json.dumps(record), encoding="utf-8")
+        result = self.call()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("verify", result.stderr)
+
+    def test_denies_on_brief_with_non_integer_attempt(self):
+        directory = self.state_dir()
+        brief = valid_brief(attempt="one")
+        record = {"schema_version": 1, "run_id": "x", "status": "open",
+                   "opened_at": "2026-01-01T00:00:00+00:00", "brief": brief}
+        (directory / "dispatch-x.json").write_text(
+            json.dumps(record), encoding="utf-8")
+        result = self.call()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("verify", result.stderr)
+
+    def test_deny_reason_names_the_offending_file(self):
+        directory = self.state_dir()
+        target = directory / "dispatch-broken.json"
+        target.write_bytes(b"\xff\xfe not json")
+        result = self.call()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(str(target), result.stderr)
+        self.assertIn("verify", result.stderr)
+
+    def test_denies_when_dispatch_state_cannot_be_imported(self):
+        with tempfile.TemporaryDirectory() as isolated:
+            isolated = Path(isolated)
+            (isolated / "hooks").mkdir()
+            shutil.copy(HOOKS / "root_write_guard.py",
+                        isolated / "hooks" / "root_write_guard.py")
+            workspace = isolated / "workspace"
+            directory = workspace / ".root-architect" / "state"
+            directory.mkdir(parents=True)
+            (directory / "dispatch-x.json").write_text(
+                json.dumps({"status": "open"}), encoding="utf-8")
+            payload = {"tool_name": "Edit", "cwd": str(workspace),
+                       "tool_input": {"file_path": "scripts/envelope.py"}}
+            result = run(isolated / "hooks" / "root_write_guard.py", [],
+                         stdin=json.dumps(payload))
+            self.assertEqual(result.returncode, 2)
+
 
 class WorkerGitGuardTests(unittest.TestCase):
 
