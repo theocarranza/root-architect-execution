@@ -7,6 +7,7 @@ suite — the mini validator is checked through the contracts that use it.
     python3 -m unittest discover -s tests -t .
 """
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,7 @@ HOOKS = ROOT / "hooks"
 sys.path.insert(0, str(SCRIPTS))
 
 from jsonschema_mini import Validator  # noqa: E402
+from dispatch_state import DispatchStateError  # noqa: E402
 import render_agents  # noqa: E402
 
 
@@ -340,6 +342,189 @@ class DispatchStateTests(unittest.TestCase):
         result = run(SCRIPTS / "dispatch_state.py",
                      ["active", "--workspace", str(self.workspace)])
         self.assertIn("no open dispatch", result.stdout)
+
+    def test_verify_exits_0_when_idle(self):
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["verify", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 0)
+
+    def test_verify_exits_0_and_lists_a_healthy_dispatch(self):
+        self.open_dispatch()
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["verify", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok open 20260907-task-3", result.stdout)
+
+    def test_verify_exits_1_on_corrupt_json(self):
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "dispatch-bad.json").write_text("not json", encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["verify", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("CORRUPT", result.stdout)
+        self.assertIn("not valid JSON", result.stdout)
+
+    def test_verify_exits_1_on_invalid_schema(self):
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "dispatch-bad.json").write_text(
+            json.dumps({"schema_version": 1, "run_id": "bad"}), encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["verify", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("CORRUPT", result.stdout)
+
+    def test_open_fails_cleanly_on_corrupt_file(self):
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "dispatch-old.json").write_text("bad json", encoding="utf-8")
+        result = self.open_dispatch()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("state file corrupted", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_active_fails_cleanly_on_corrupt_file(self):
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "dispatch-old.json").write_text("bad json", encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["active", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("state file corrupted", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_close_fails_cleanly_on_corrupt_file(self):
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "dispatch-task-3.json").write_text("bad json", encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py", [
+            "close", "--workspace", str(self.workspace),
+            "--run-id", "task-3", "--outcome", "accepted"])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot read state file", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_active_skips_corrupt_closed_record_and_finds_open(self):
+        """A corrupt closed/aborted record should not block finding an open dispatch."""
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        # Write a corrupt closed record that sorts before the open one
+        (state_dir / "dispatch-20260901-old.json").write_text(
+            json.dumps({"schema_version": 1, "run_id": "20260901-old",
+                       "status": "closed"}), encoding="utf-8")
+        # Write a healthy open record
+        self.open_dispatch(run_id="20260907-task-3")
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["active", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("20260907-task-3", result.stdout)
+
+    def test_active_raises_on_unparseable_even_with_open_record(self):
+        """An unparseable record must raise even if another record is open."""
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        # Write a healthy open record first
+        self.open_dispatch(run_id="20260907-task-3")
+        # Write an unparseable record that sorts after
+        (state_dir / "dispatch-20260908-bad.json").write_text(
+            "corrupted data", encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["active", "--workspace", str(self.workspace)])
+        # Should fail because the unparseable record could be the open dispatch
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("state file corrupted", result.stderr)
+
+    def test_missing_schema_produces_clean_error_not_traceback(self):
+        """Missing schema file should raise DispatchStateError, not FileNotFoundError."""
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        self.open_dispatch()
+        # Temporarily hide the schema file
+        schemas_dir = ROOT / "schemas"
+        dispatch_schema = schemas_dir / "dispatch.schema.json"
+        backup = dispatch_schema.read_text(encoding="utf-8")
+        try:
+            dispatch_schema.unlink()
+            result = run(SCRIPTS / "dispatch_state.py",
+                         ["active", "--workspace", str(self.workspace)])
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("schema", result.stderr.lower())
+            self.assertNotIn("FileNotFoundError", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+        finally:
+            dispatch_schema.write_text(backup, encoding="utf-8")
+
+    def test_verify_reports_all_files_including_corrupt(self):
+        """verify should report on every file and exit 1 if any are corrupt."""
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        # Write a healthy dispatch
+        self.open_dispatch(run_id="20260907-task-1")
+        # Write a corrupt dispatch
+        (state_dir / "dispatch-20260907-bad.json").write_text(
+            "not json", encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["verify", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("ok open 20260907-task-1", result.stdout)
+        self.assertIn("CORRUPT", result.stdout)
+
+    def make_corrupted_copy(self, schema_name, contents):
+        """Build a scratch copy of scripts/ + schemas/ with one schema corrupted.
+
+        Returns the path to dispatch_state.py inside the copy so tests never
+        touch the real schemas/ directory.
+        """
+        copy_root = Path(self.tmp.name) / "_repo_copy"
+        shutil.copytree(SCRIPTS, copy_root / "scripts")
+        shutil.copytree(ROOT / "schemas", copy_root / "schemas")
+        (copy_root / "schemas" / schema_name).write_text(contents, encoding="utf-8")
+        return copy_root / "scripts" / "dispatch_state.py"
+
+    def test_active_fails_cleanly_when_schema_file_is_invalid_json(self):
+        """A schema file that exists but is not valid JSON must not traceback."""
+        script = self.make_corrupted_copy(
+            "dispatch.schema.json", "not json at all")
+        self.open_dispatch()
+        result = run(script, ["active", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("dispatch.schema.json", result.stderr)
+        self.assertIn("not valid json", result.stderr.lower())
+
+    def test_verify_reports_corrupt_when_schema_file_is_invalid_json(self):
+        """verify must still exit 1 and report CORRUPT, not traceback."""
+        script = self.make_corrupted_copy(
+            "brief.schema.json", "{ this is not json")
+        self.open_dispatch()
+        result = run(script, ["verify", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("CORRUPT", result.stdout)
+
+    def test_active_fails_cleanly_when_top_level_json_is_a_list(self):
+        """A dispatch file whose top level is a list must not AttributeError."""
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "dispatch-list.json").write_text(
+            json.dumps([1, 2, 3]), encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["active", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("state file corrupted", result.stderr)
+
+    def test_active_fails_cleanly_when_top_level_json_is_null(self):
+        """A dispatch file whose top level is null must not AttributeError."""
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "dispatch-null.json").write_text("null", encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["active", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("state file corrupted", result.stderr)
 
 
 class RootWriteGuardTests(unittest.TestCase):
