@@ -7,6 +7,7 @@ suite — the mini validator is checked through the contracts that use it.
     python3 -m unittest discover -s tests -t .
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -120,6 +121,28 @@ class MiniValidatorTests(unittest.TestCase):
             with self.subTest(path=bad):
                 errors = self.brief.validate(valid_brief(write_paths=[bad]))
                 self.assertTrue(any("pattern" in e for e in errors), bad)
+
+    def test_rejects_control_characters_in_write_paths(self):
+        """A brief whose write_paths contain control characters (U+0000-U+001F, U+007F)
+        must be rejected by the brief schema."""
+        for control_char in [chr(0), chr(1), '\t', '\n', chr(31), chr(127)]:
+            with self.subTest(control_char=repr(control_char)):
+                errors = self.brief.validate(
+                    valid_brief(write_paths=["scripts/envelope.py", "bad" + control_char + "path"])
+                )
+                self.assertTrue(any("pattern" in e for e in errors),
+                              f"Schema should reject control char {repr(control_char)}")
+
+    def test_rejects_control_characters_in_read_paths(self):
+        """A brief whose read_paths contain control characters (U+0000-U+001F, U+007F)
+        must be rejected by the brief schema."""
+        for control_char in [chr(0), chr(1), '\t', '\n', chr(31), chr(127)]:
+            with self.subTest(control_char=repr(control_char)):
+                errors = self.brief.validate(
+                    valid_brief(read_paths=["scripts/envelope.py", "bad" + control_char + "path"])
+                )
+                self.assertTrue(any("pattern" in e for e in errors),
+                              f"Schema should reject control char {repr(control_char)}")
 
     def test_anyof_accepts_both_effort_forms(self):
         for effort in ("high", "not settable on this host"):
@@ -577,6 +600,53 @@ class DispatchStateTests(unittest.TestCase):
         self.assertIn("state file corrupted", result.stderr)
 
 
+    def _make_unlistable(self, directory):
+        """chmod 000 a state directory, restoring the mode whatever happens.
+
+        Skipped as root: uid 0 bypasses permission bits, so the directory
+        would still list and the test would pass while proving nothing.
+        """
+        if os.geteuid() == 0:
+            self.skipTest("root bypasses permission bits; chmod 000 proves nothing")
+        directory.mkdir(parents=True, exist_ok=True)
+        original = directory.stat().st_mode
+        os.chmod(directory, 0o000)
+        self.addCleanup(os.chmod, directory, original)
+
+    def test_active_raises_when_state_directory_cannot_be_listed(self):
+        """An unlistable state directory is untrusted, not 'no dispatch open'.
+
+        Path.glob() swallows the PermissionError from scandir and yields
+        nothing, which would read exactly like an empty directory.
+        """
+        from dispatch_state import active_dispatch
+        directory = self.workspace / ".root-architect" / "state"
+        self._make_unlistable(directory)
+        with self.assertRaises(DispatchStateError) as caught:
+            active_dispatch(self.workspace)
+        self.assertIn(str(directory), str(caught.exception))
+
+    def test_active_command_fails_cleanly_on_an_unlistable_directory(self):
+        directory = self.workspace / ".root-architect" / "state"
+        self._make_unlistable(directory)
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["active", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("no open dispatch", result.stdout)
+        self.assertIn(str(directory), result.stderr)
+
+    def test_verify_reports_an_unlistable_directory(self):
+        directory = self.workspace / ".root-architect" / "state"
+        self._make_unlistable(directory)
+        result = run(SCRIPTS / "dispatch_state.py",
+                     ["verify", "--workspace", str(self.workspace)])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("no dispatch files", result.stdout)
+        self.assertIn(str(directory), result.stdout + result.stderr)
+
+
 class RootWriteGuardTests(unittest.TestCase):
     """Root must not write product code around an open delegation."""
 
@@ -806,6 +876,297 @@ class RootWriteGuardTests(unittest.TestCase):
             result = run(isolated / "hooks" / "root_write_guard.py", [],
                          stdin=json.dumps(payload))
             self.assertEqual(result.returncode, 2)
+
+    def test_denies_when_the_state_directory_cannot_be_listed(self):
+        """chmod 000 on live state must not turn a proven deny into an allow."""
+        if os.geteuid() == 0:
+            self.skipTest("root bypasses permission bits; chmod 000 proves nothing")
+        self.open_dispatch()
+        directory = self.workspace / ".root-architect" / "state"
+        original = directory.stat().st_mode
+        self.assertEqual(self.call().returncode, 2)
+        os.chmod(directory, 0o000)
+        self.addCleanup(os.chmod, directory, original)
+        result = self.call()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn(str(directory), result.stderr)
+
+    def test_import_fallback_denies_when_the_directory_cannot_be_listed(self):
+        """The no-import fallback globs too, and glob is just as silent there."""
+        if os.geteuid() == 0:
+            self.skipTest("root bypasses permission bits; chmod 000 proves nothing")
+        with tempfile.TemporaryDirectory() as isolated:
+            isolated = Path(isolated)
+            (isolated / "hooks").mkdir()
+            shutil.copy(HOOKS / "root_write_guard.py",
+                        isolated / "hooks" / "root_write_guard.py")
+            workspace = isolated / "workspace"
+            directory = workspace / ".root-architect" / "state"
+            directory.mkdir(parents=True)
+            (directory / "dispatch-x.json").write_text(
+                json.dumps({"status": "open"}), encoding="utf-8")
+            original = directory.stat().st_mode
+            os.chmod(directory, 0o000)
+            try:
+                payload = {"tool_name": "Edit", "cwd": str(workspace),
+                           "tool_input": {"file_path": "scripts/envelope.py"}}
+                result = run(isolated / "hooks" / "root_write_guard.py", [],
+                             stdin=json.dumps(payload))
+                self.assertEqual(result.returncode, 2,
+                                 result.stdout + result.stderr)
+                self.assertIn(str(directory), result.stderr)
+            finally:
+                os.chmod(directory, original)
+
+    def test_resolve_owned_isolation(self):
+        """_resolve_owned must return resolvable paths even when one fails.
+
+        This directly tests Defect 1's isolation fix: each owned path resolution
+        is wrapped in its own try/except, so a path that raises OSError or ValueError
+        does not abort the entire list. When isolation is removed (reverted to a
+        single list comprehension), this assertion fails because the comprehension
+        raises instead of returning a partial list.
+        """
+        # Import the guard module to access _resolve_owned
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("root_write_guard", HOOKS / "root_write_guard.py")
+        guard_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard_module)
+
+        root = Path.cwd()
+        # Mix a resolvable path with an unresolvable one (containing null byte)
+        write_paths = ["scripts/envelope.py", "bad" + chr(0) + "path"]
+
+        resolved = guard_module._resolve_owned(root, write_paths)
+
+        # The resolvable path MUST be in the result, even though one failed
+        # This assertion fails if isolation is removed and the comprehension raises
+        self.assertEqual(len(resolved), 1)
+        self.assertTrue(any("envelope.py" in str(p) for p in resolved))
+
+    def test_resolve_owned_skips_a_symlink_loop_entry(self):
+        """A self-referential symlink among write_paths must not crash
+        resolution; the remaining, resolvable entries are still returned.
+
+        This is the direct unit test for Defect 3: pathlib.Path.resolve()
+        raises a bare RuntimeError ("Symlink loop from ...") for a symlink
+        loop on this interpreter, which is neither OSError nor ValueError.
+        """
+        loop = self.workspace / "loop"
+        try:
+            loop.symlink_to(loop)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation not permitted in this environment")
+
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "root_write_guard", HOOKS / "root_write_guard.py")
+        guard_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard_module)
+
+        (self.workspace / "scripts").mkdir()
+        (self.workspace / "scripts" / "owned.py").write_text("x", encoding="utf-8")
+
+        resolved = guard_module._resolve_owned(
+            self.workspace, ["scripts/owned.py", "loop/x"])
+
+        self.assertEqual(len(resolved), 1)
+        self.assertTrue(any("owned.py" in str(p) for p in resolved))
+
+    def test_blocks_a_genuinely_owned_path_when_another_write_path_loops(self):
+        """A dispatch whose write_paths include a symlink loop must still
+        deny an edit to the other, genuinely owned path in the same list --
+        and must never crash with a traceback while doing it.
+        """
+        loop = self.workspace / "loop"
+        try:
+            loop.symlink_to(loop)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation not permitted in this environment")
+
+        (self.workspace / "scripts").mkdir(exist_ok=True)
+        (self.workspace / "scripts" / "owned.py").write_text("x", encoding="utf-8")
+
+        self.open_dispatch(valid_brief(
+            write_paths=["scripts/owned.py", "loop/x"]))
+        result = self.call(path="scripts/owned.py")
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_survives_an_edit_target_that_is_itself_a_symlink_loop(self):
+        """The edit target resolving through a symlink loop must not crash
+        the hook with an uncaught exception (exit 1); it must exit 0 or 2.
+        """
+        loop = self.workspace / "loop"
+        try:
+            loop.symlink_to(loop)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation not permitted in this environment")
+
+        self.open_dispatch()
+        result = self.call(path="loop/x")
+        self.assertIn(result.returncode, (0, 2))
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_guard_denies_via_schema_invalid_branch(self):
+        """The guard must deny when dispatch state is schema-invalid.
+
+        This end-to-end test verifies the fail-closed invariant: when the guard
+        cannot verify dispatch state (schema-invalid, unparseable, or untrusted),
+        it denies the write. The deny happens via the schema-validation branch in
+        active_dispatch() and DispatchStateError, BEFORE the guard's own path
+        comparison logic is reached.
+
+        This test does not exercise the per-path resolution isolation fix (Defect 1).
+        That fix is tested directly in test_resolve_owned_isolation() via the
+        _resolve_owned() function.
+        """
+        # Manually write a dispatch state with a control character in write_paths.
+        # After DEFECT 2 is fixed, the schema rejects control characters, so
+        # active_dispatch() raises DispatchStateError during schema validation.
+        # This triggers the guard's fail-closed denial before path resolution.
+        directory = self.state_dir()
+        brief = valid_brief(write_paths=["scripts/envelope.py", "bad" + chr(0) + "path"])
+        record = {
+            "schema_version": 1,
+            "run_id": "20260907-test-schema-invalid",
+            "status": "open",
+            "opened_at": "2026-01-01T00:00:00+00:00",
+            "brief": brief
+        }
+        (directory / "dispatch-20260907-test-schema-invalid.json").write_text(
+            json.dumps(record), encoding="utf-8")
+
+        result = self.call()
+        # Should deny via schema-invalid branch, not allow
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot be trusted", result.stderr)
+
+
+    # --- A denial must terminate the process even if it cannot report ---
+
+    def unwritable_stdout(self):
+        """Open a stream that accepts no bytes, or skip if none is available.
+
+        /dev/full raises ENOSPC on every write, which is the closest stand-in
+        for the "device full" and "broken pipe" cases root observed. Where it
+        does not exist, the caller skips rather than silently passing.
+        """
+        try:
+            return open("/dev/full", "w")
+        except OSError:
+            self.skipTest("/dev/full is not available in this environment")
+
+    def test_denial_exits_2_when_stdout_cannot_be_written(self):
+        """The load-bearing invariant: only exit 2 blocks a call.
+
+        The guard has already PROVEN the target is owned by an open dispatch.
+        If reporting that denial fails, the denial itself must still stand.
+        Exit 0 (the outer handler swallowing the OSError and allowing) and
+        exit 120 (an OSError surfacing at interpreter-shutdown flush after
+        sys.exit(2)) are both fail-open, and both are failures here.
+        """
+        self.open_dispatch()
+        payload = json.dumps({"tool_name": "Edit", "cwd": str(self.workspace),
+                              "tool_input": {"file_path": "scripts/envelope.py"}})
+        for unbuffered in (True, False):
+            with self.subTest(unbuffered=unbuffered):
+                env = dict(os.environ)
+                if unbuffered:
+                    env["PYTHONUNBUFFERED"] = "1"
+                else:
+                    env.pop("PYTHONUNBUFFERED", None)
+                sink = self.unwritable_stdout()
+                try:
+                    result = subprocess.run(
+                        [sys.executable, str(HOOKS / "root_write_guard.py")],
+                        input=payload, text=True, env=env,
+                        stdout=sink, stderr=subprocess.PIPE)
+                finally:
+                    sink.close()
+                self.assertEqual(result.returncode, 2)
+
+    def test_denial_exits_2_when_stdout_is_a_closed_pipe(self):
+        """Same invariant via the other real-world shape: a broken pipe."""
+        self.open_dispatch()
+        payload = json.dumps({"tool_name": "Edit", "cwd": str(self.workspace),
+                              "tool_input": {"file_path": "scripts/envelope.py"}})
+        for unbuffered in (True, False):
+            with self.subTest(unbuffered=unbuffered):
+                env = dict(os.environ)
+                if unbuffered:
+                    env["PYTHONUNBUFFERED"] = "1"
+                else:
+                    env.pop("PYTHONUNBUFFERED", None)
+                read_fd, write_fd = os.pipe()
+                os.close(read_fd)
+                try:
+                    result = subprocess.run(
+                        [sys.executable, str(HOOKS / "root_write_guard.py")],
+                        input=payload, text=True, env=env,
+                        stdout=write_fd, stderr=subprocess.PIPE)
+                finally:
+                    os.close(write_fd)
+                self.assertEqual(result.returncode, 2)
+
+    def test_deny_itself_exits_2_when_the_stdout_write_raises(self):
+        """_deny() must be unconditionally terminal, exercised directly.
+
+        Narrowing the outer try in _main() is necessary but not sufficient:
+        if _deny()'s print then raises, the exception reaches main()'s safety
+        net, which calls _deny() again on the same broken stream, and the
+        second exception escapes as exit 1. A reporting failure must not
+        change _deny()'s exit code.
+        """
+        program = (
+            "import importlib.util, sys\n"
+            "spec = importlib.util.spec_from_file_location("
+            "'root_write_guard', %r)\n"
+            "m = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(m)\n"
+            "class Broken:\n"
+            "    def write(self, *a): raise OSError(28, 'No space left on device')\n"
+            "    def flush(self): raise OSError(28, 'No space left on device')\n"
+            "sys.stdout = Broken()\n"
+            "m._deny('boom')\n"
+        ) % str(HOOKS / "root_write_guard.py")
+        result = subprocess.run([sys.executable, "-c", program],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+
+    def test_deny_exits_2_when_both_streams_are_broken(self):
+        """Neither the stdout payload nor the stderr reason may rescue a call."""
+        program = (
+            "import importlib.util, sys\n"
+            "spec = importlib.util.spec_from_file_location("
+            "'root_write_guard', %r)\n"
+            "m = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(m)\n"
+            "class Broken:\n"
+            "    def write(self, *a): raise OSError(28, 'No space left on device')\n"
+            "    def flush(self): raise OSError(28, 'No space left on device')\n"
+            "sys.stdout = Broken()\n"
+            "sys.stderr = Broken()\n"
+            "m._deny('boom')\n"
+        ) % str(HOOKS / "root_write_guard.py")
+        result = subprocess.run([sys.executable, "-c", program],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+
+    def test_allow_still_exits_0_with_an_unwritable_stdout(self):
+        """The fix must not turn deliberate allows into denials."""
+        self.open_dispatch()
+        payload = json.dumps({"tool_name": "Edit", "cwd": str(self.workspace),
+                              "tool_input": {"file_path": "AI_Codex/session.md"}})
+        sink = self.unwritable_stdout()
+        try:
+            result = subprocess.run(
+                [sys.executable, str(HOOKS / "root_write_guard.py")],
+                input=payload, text=True,
+                stdout=sink, stderr=subprocess.PIPE)
+        finally:
+            sink.close()
+        self.assertEqual(result.returncode, 0)
 
 
 class WorkerGitGuardTests(unittest.TestCase):

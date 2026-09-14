@@ -18,6 +18,7 @@ paths it is protecting.
 """
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,30 @@ class DispatchStateError(Exception):
 
 def state_dir(workspace):
     return Path(workspace).resolve() / STATE_SUBDIR
+
+
+def _dispatch_files(directory):
+    """List dispatch-*.json under a directory, proving the listing succeeded.
+
+    Path.glob() is not usable on its own here: it walks os.scandir and
+    swallows the PermissionError an unreadable directory raises, yielding
+    nothing. A directory that exists but cannot be read would then be
+    indistinguishable from an empty one, and the guard would read "I could
+    not look" as "nothing is there" and allow a delegated write.
+
+    So the listing is attempted explicitly and any OSError becomes a
+    DispatchStateError, which the guard already converts into a deny.
+    os.access is deliberately not used: it answers a different question
+    (against the real uid, and ignoring ACLs) and can disagree with what an
+    actual read attempt does.
+    """
+    try:
+        names = os.listdir(directory)
+    except OSError as e:
+        raise DispatchStateError(
+            directory, ["state directory cannot be listed: %s" % e])
+    return sorted(directory / name for name in names
+                  if name.startswith("dispatch-") and name.endswith(".json"))
 
 
 def _validate_dispatch(data, schema_path):
@@ -96,15 +121,17 @@ def active_dispatch(workspace):
         VALIDATE against schema and raise DispatchStateError on any error,
         because we cannot trust the status field if others are corrupt.
 
-    Returns (None, None) when the state directory is absent or contains no open
-    dispatch records.
+    Returns (None, None) only when the state directory is absent or is
+    listable and contains no open dispatch records. A directory that exists
+    but cannot be listed raises DispatchStateError instead: unproven state is
+    never reported as "no dispatch open".
     """
     directory = state_dir(workspace)
     if not directory.is_dir():
         return None, None
 
     open_dispatch_found = None
-    for candidate in sorted(directory.glob("dispatch-*.json")):
+    for candidate in _dispatch_files(directory):
         try:
             data = json.loads(candidate.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
@@ -255,7 +282,14 @@ def cmd_verify(args):
         print("no state directory: %s" % directory)
         return 0
 
-    files = sorted(directory.glob("dispatch-*.json"))
+    try:
+        files = _dispatch_files(directory)
+    except DispatchStateError as e:
+        print("CORRUPT %s" % e.path)
+        for error in e.errors:
+            print("  %s" % error)
+        return 1
+
     if not files:
         print("no dispatch files under %s" % directory)
         return 0

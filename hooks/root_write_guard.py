@@ -19,13 +19,17 @@ path the open dispatch does not own, and every edit made while no dispatch is
 open. Root is not locked out of its own repository — it is stopped from
 overwriting the exact work it has delegated and is waiting on.
 
-Exit 2 blocks the call and shows the reason to the model. Dispatch state that
+Exit 2 blocks the call and shows the reason to the model. On Codex, canonical
+apply_patch is intentionally outside this guard: Codex does not document
+worker identity in PreToolUse, so blocking it would also block the worker.
+Codex relies on the instructional boundary and root diff review. Dispatch state that
 exists but cannot be trusted (unparseable, schema-invalid, or unreadable
 because dispatch_state itself could not be imported) is also treated as a
 block: this guard fails closed, never open, whenever it cannot prove no
 delegation is open.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -52,19 +56,89 @@ def _allow():
     sys.exit(0)
 
 
+def _report(stream, text):
+    """Best-effort write. A stream that cannot take the text is not an error.
+
+    Reporting is how a denial explains itself; it is not how a denial takes
+    effect. Only the exit code blocks the call, so a broken pipe or a full
+    device must never be allowed to propagate out of here.
+    """
+    try:
+        stream.write(text)
+        stream.flush()
+    except Exception:
+        pass
+
+
 def _deny(reason):
-    print(json.dumps({
+    """Unconditionally terminal: exit 2 whatever the streams do.
+
+    Two ways this used to fail open. (1) An OSError from the payload write
+    escaped into a caller's except clause, which then allowed the call, or
+    reached main()'s safety net, which called _deny() again on the same
+    broken stream and let the second exception escape as exit 1. (2) Even
+    with the exception contained, sys.exit(2) still runs the interpreter's
+    shutdown flush, and a failing flush there makes Python report 120 no
+    matter what this function decided.
+
+    So: write and flush both streams under their own handling, then leave
+    via os._exit, which cannot be re-entered and runs no shutdown flush.
+    Both streams are already flushed above, so nothing reportable is lost.
+    Only exit 2 blocks a call; 0, 1 and 120 are all fail-open.
+    """
+    _report(sys.stdout, json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": reason,
         }
-    }))
-    print(reason, file=sys.stderr)
-    sys.exit(2)
+    }) + "\n")
+    _report(sys.stderr, reason + "\n")
+    os._exit(2)
+
+
+def _resolve_owned(root, write_paths):
+    """Resolve each write_path independently, skipping entries that raise.
+
+    Returns a list of resolved Path objects. An entry that raises OSError or
+    ValueError during resolution is skipped, and remaining entries are still
+    resolved and returned. This isolation ensures one unresolvable path does
+    not prevent checking the others.
+    """
+    owned_paths = []
+    for owned in write_paths:
+        try:
+            owned_paths.append((root / owned).resolve())
+        except (OSError, ValueError, RuntimeError):
+            # RuntimeError is what pathlib.Path.resolve() raises for a
+            # symlink loop on this interpreter ("Symlink loop from ...").
+            # It is neither OSError nor ValueError, so it must be listed
+            # explicitly or a looping entry crashes the whole hook.
+            continue
+    return owned_paths
 
 
 def main():
+    """Top-level safety net: any unexpected exception denies, never crashes.
+
+    _allow() and _deny() communicate via SystemExit, which this must not
+    swallow. Anything else escaping _main() is unproven, untrusted state by
+    the guard's own contract, so it is treated the same as unreadable
+    dispatch state: deny with exit 2, never let an internal error fall
+    through to a bare exit 1 (which PreToolUse treats as non-blocking).
+    """
+    try:
+        _main()
+    except SystemExit:
+        raise
+    except Exception as e:
+        _deny(
+            "Root write guard: an internal error occurred while checking "
+            "this call, so it cannot be verified safe:\n  %r\n"
+            "This guard fails closed on internal errors, never open." % (e,))
+
+
+def _main():
     try:
         payload = json.load(sys.stdin)
     except ValueError:
@@ -100,7 +174,27 @@ def main():
         # Cannot verify dispatch state without the module. Do not trust that
         # no dispatch is open just because we cannot check: look for state
         # files directly, with no import needed.
-        found = sorted(Path(workspace).glob(".root-architect/state/dispatch-*.json"))
+        directory = Path(workspace) / ".root-architect" / "state"
+        if directory.is_dir():
+            # glob() would swallow the PermissionError from an unreadable
+            # directory and yield nothing, which reads exactly like "no state
+            # files". List explicitly so a failure to look is never mistaken
+            # for proof that nothing is there.
+            try:
+                names = os.listdir(directory)
+            except OSError as e:
+                _deny(
+                    "Root write guard: dispatch_state could not be imported, "
+                    "and the state directory %s exists but cannot be listed:\n"
+                    "  %s\n"
+                    "This guard cannot verify whether a dispatch is open, and "
+                    "fails closed rather than open. Restore access to the "
+                    "directory, or remove it if the run is over."
+                    % (directory, e))
+        else:
+            names = []
+        found = sorted(directory / name for name in names
+                       if name.startswith("dispatch-") and name.endswith(".json"))
         if found:
             _deny(
                 "Root write guard: dispatch_state could not be imported, so "
@@ -129,28 +223,30 @@ def main():
     if not isinstance(tool_input, dict):
         # Malformed hook input, not malformed state. Do not block real work.
         _allow()
-    raw = next((tool_input[k] for k in PATH_KEYS if tool_input.get(k)), None)
-    if raw is None:
-        _allow()
-    raw = _usable_path(raw)
-    if raw is None:
-        # An integer, a list or a null-byte path is not a write we can locate.
-        _allow()
-
-    try:
-        root = Path(workspace).resolve()
-        target = (root / raw).resolve() if not Path(raw).is_absolute() \
-            else Path(raw).resolve()
-    except (OSError, ValueError):
+    raw_paths = [tool_input[k] for k in PATH_KEYS if tool_input.get(k)]
+    if not raw_paths:
         _allow()
 
     brief = dispatch["brief"]
-    for owned in brief.get("write_paths", []):
-        try:
-            owned_path = (root / owned).resolve()
-        except (OSError, ValueError):
+    # The try below covers resolution only. It must never span the ownership
+    # comparison or the _deny() call: an OSError raised while *reporting* a
+    # proven denial would otherwise be caught here and turned into _allow(),
+    # exiting 0 and letting the delegated write through.
+    try:
+        root = Path(workspace).resolve()
+        owned_paths = _resolve_owned(root, brief.get("write_paths", []))
+    except (OSError, ValueError, RuntimeError):
+        _allow()
+
+    for raw in raw_paths:
+        raw = _usable_path(raw)
+        if raw is None:
             continue
-        if target == owned_path or owned_path in target.parents:
+        try:
+            target = (root / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
+        except (OSError, ValueError, RuntimeError):
+            continue
+        if any(target == owned or owned in target.parents for owned in owned_paths):
             _deny(
                 "Root write guard: %s is a write path of open dispatch %s "
                 "(task %r, attempt %d of %d, worker %s).\n"
