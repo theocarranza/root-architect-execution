@@ -1205,9 +1205,24 @@ class RootWriteGuardTests(unittest.TestCase):
         """A self-referential symlink among write_paths must not crash
         resolution; the remaining, resolvable entries are still returned.
 
-        This is the direct unit test for Defect 3: pathlib.Path.resolve()
-        raises a bare RuntimeError ("Symlink loop from ...") for a symlink
-        loop on this interpreter, which is neither OSError nor ValueError.
+        This is the direct unit test for Defect 3. What a looping entry
+        resolves to is interpreter-defined and changed in 3.13, so what is
+        asserted here is the contract, not the length of the list:
+
+        - Up to 3.12, pathlib.Path.resolve() raises a bare RuntimeError
+          ("Symlink loop from ..."), which is neither OSError nor
+          ValueError. _resolve_owned must name it explicitly or one bad
+          entry takes down the whole hook. The entry is then dropped, and
+          the path the dispatch declared it owns loses its protection.
+        - From 3.13, resolve() follows os.path.realpath(strict=False) and
+          returns the path unchanged instead of raising. The entry
+          survives, so the declared path stays protected.
+
+        Dropping a declared write_path is the weaker of those two, so
+        asserting a count would pin this to the less safe behaviour. The
+        invariant that holds on every interpreter, and the one that
+        matters, is that no exception escapes and every genuinely
+        resolvable owned path is still returned.
         """
         loop = self.workspace / "loop"
         try:
@@ -1227,8 +1242,17 @@ class RootWriteGuardTests(unittest.TestCase):
         resolved = guard_module._resolve_owned(
             self.workspace, ["scripts/owned.py", "loop/x"])
 
-        self.assertEqual(len(resolved), 1)
+        # Resolution completed instead of raising, and the entry that can be
+        # resolved is protected on every interpreter.
         self.assertTrue(any("owned.py" in str(p) for p in resolved))
+
+        # The looping entry is either dropped (<= 3.12) or carried through
+        # verbatim (3.13+). What must never happen is it resolving to some
+        # third path, which would protect the wrong file.
+        looping = [p for p in resolved if "owned.py" not in str(p)]
+        self.assertIn(len(looping), (0, 1))
+        for path in looping:
+            self.assertTrue(str(path).endswith(os.path.join("loop", "x")))
 
     def test_blocks_a_genuinely_owned_path_when_another_write_path_loops(self):
         """A dispatch whose write_paths include a symlink loop must still

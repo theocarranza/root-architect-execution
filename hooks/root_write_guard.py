@@ -111,9 +111,16 @@ def _resolve_owned(root, write_paths):
             owned_paths.append((root / owned).resolve())
         except (OSError, ValueError, RuntimeError):
             # RuntimeError is what pathlib.Path.resolve() raises for a
-            # symlink loop on this interpreter ("Symlink loop from ...").
-            # It is neither OSError nor ValueError, so it must be listed
+            # symlink loop up to 3.12 ("Symlink loop from ..."). It is
+            # neither OSError nor ValueError, so it must be listed
             # explicitly or a looping entry crashes the whole hook.
+            #
+            # From 3.13 resolve() follows os.path.realpath(strict=False)
+            # and returns the path unchanged rather than raising, so a
+            # looping entry no longer reaches this handler at all. It stays
+            # in owned_paths and the path the dispatch declared keeps its
+            # protection, which is the safer of the two behaviours. The
+            # catch stays for 3.12 and earlier, where the entry is dropped.
             continue
     return owned_paths
 
