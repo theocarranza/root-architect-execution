@@ -120,19 +120,34 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/check_return.py" \
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" verify
 ```
 
-When contributing to *this* repo, the outcome gate is these three, and the last
-one is not optional:
+When contributing to *this* repo, the outcome gate is these five, and none of
+them is optional:
 
 ```bash
 python3 -m unittest discover -s tests -t .
 python3 scripts/render_agents.py --host claude-code --check
+python3 scripts/render_agents.py --host codex --check
 claude plugin validate .
+python3.11 -m unittest discover -s tests -t .   # any 3.11+, for tomllib
 ```
 
-The tests do not read `.claude-plugin/`, so a manifest that disagrees with
-itself passes them cleanly. That has already happened once here: a version bump
-moved `plugin.json` and left the marketplace entry behind, and only
-`claude plugin validate` noticed.
+Each of the last three exists because the suite alone has been green over a
+real defect:
+
+- The tests do not read `.claude-plugin/`, so a manifest that disagrees with
+  itself passes them cleanly. A version bump moved `plugin.json` and left the
+  marketplace entry behind, and only `claude plugin validate` noticed.
+- `--check` is per host. A `hosts/codex.json` change leaves `agents/` in sync
+  and `dist/codex/` stale.
+- The Codex agents are TOML, and `tomllib` is 3.11+. On a 3.10 interpreter with
+  no `tomli` installed, every parser-backed assertion **skips** — so a
+  generated manifest that no TOML parser would accept can ship green. Install
+  `tomli`, or run the suite once on 3.11+. The suite prints an explicit skip
+  naming what went unverified rather than passing silently.
+
+That last point is the outcome gate's own rule applied to this repo: a test
+suite only checks what it was written to check, and generated output is exactly
+the kind of artifact it can miss.
 
 ## What the hooks enforce
 

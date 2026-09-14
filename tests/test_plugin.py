@@ -208,11 +208,32 @@ class RenderTests(unittest.TestCase):
         self.assertIn("defaultPrompt", manifest["interface"])
         self.assertTrue((ROOT / "skills/root-architect-execution/SKILL.md").exists())
 
-    def test_codex_render_is_parseable_and_uses_no_placeholder_when_installed(self):
+    def toml_parser(self):
+        """A real TOML parser, or an explicit skip naming what is uncovered.
+
+        tomllib is 3.11+, and this repo's `python3` is 3.10, so every
+        parser-backed assertion here is skipped under the documented outcome
+        command. That is the exact gap SKILL.md's outcome gate warns about —
+        generated output can leave a suite green and still ship broken — so
+        the skip says so, README names the 3.12 probe as part of the gate,
+        and the parser-free assertions above carry the load on 3.10.
+        """
         try:
             import tomllib
+            return tomllib
         except ImportError:
-            self.skipTest("tomllib unavailable")
+            pass
+        try:
+            import tomli
+            return tomli
+        except ImportError:
+            self.skipTest(
+                "no TOML parser on this interpreter (tomllib needs 3.11+). "
+                "Generated Codex TOMLs are UNVERIFIED here; run the outcome "
+                "gate's python3.12 probe, or `pip install tomli`.")
+
+    def test_codex_render_is_parseable_and_uses_no_placeholder_when_installed(self):
+        tomllib = self.toml_parser()
         with tempfile.TemporaryDirectory() as tmp:
             install_codex.materialize(Path(tmp) / "agents", Path(tmp) / "plugin root")
             for path in (Path(tmp) / "agents").glob("*.toml"):
@@ -231,6 +252,74 @@ class RenderTests(unittest.TestCase):
             second = {p.name: p.read_bytes() for p in target.iterdir()}
             self.assertIn("user-agent.toml", second)
             self.assertEqual(first, second)
+
+    def test_codex_install_never_deletes_outside_its_target(self):
+        """The marker is data, not a delete list.
+
+        `.codex/agents` is the documented target and lives inside the
+        consuming project, so its marker file is as trustworthy as a cloned
+        repository — which is to say, not. An entry that escapes the
+        directory must be skipped, never unlinked: the installer owns the
+        files it wrote and nothing else.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            target = project / ".codex" / "agents"
+            target.mkdir(parents=True)
+            (project / "victim.txt").write_text("secret", encoding="utf-8")
+            nested = project / "home"
+            nested.mkdir()
+            (nested / "id_rsa").write_text("key", encoding="utf-8")
+            (target / ".root-architect-execution-codex.json").write_text(
+                json.dumps({"version": 1, "files": [
+                    "../../victim.txt", "../../home/id_rsa",
+                    "../victim.txt", "/etc/hostname", "impl-executor.toml",
+                ]}), encoding="utf-8")
+
+            install_codex.materialize(target, ROOT)
+
+            self.assertTrue((project / "victim.txt").exists(),
+                            "a marker entry escaped the target directory")
+            self.assertTrue((nested / "id_rsa").exists(),
+                            "a marker entry escaped the target directory")
+
+    def test_codex_install_survives_a_malformed_marker(self):
+        """A marker that is not a list of filenames must not abort the install.
+
+        It ran mid-way through before: the TOMLs were already written and the
+        marker had not been rewritten yet, so the next run inherited a stale
+        ownership record.
+        """
+        for payload in ('{"version": 1, "files": [1, 2]}',
+                        '{"version": 1, "files": 5}',
+                        '{"version": 1, "files": "impl-executor.toml"}',
+                        '{"version": 1}', '[]', 'null', 'not json at all'):
+            with self.subTest(marker=payload):
+                with tempfile.TemporaryDirectory() as tmp:
+                    target = Path(tmp) / "agents"
+                    target.mkdir()
+                    (target / ".root-architect-execution-codex.json").write_text(
+                        payload, encoding="utf-8")
+                    _, names = install_codex.materialize(target, ROOT)
+                    self.assertEqual(len(names), 3)
+
+    def test_codex_install_still_removes_a_file_it_owns(self):
+        """The hardening must not turn the cleanup into a no-op."""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "agents"
+            target.mkdir()
+            stale = target / "retired-agent.toml"
+            stale.write_text('name = "retired"\n', encoding="utf-8")
+            unrelated = target / "user-agent.toml"
+            unrelated.write_text('name = "user"\n', encoding="utf-8")
+            (target / ".root-architect-execution-codex.json").write_text(
+                json.dumps({"version": 1, "files": ["retired-agent.toml"]}),
+                encoding="utf-8")
+
+            install_codex.materialize(target, ROOT)
+
+            self.assertFalse(stale.exists(), "an owned stale file was kept")
+            self.assertTrue(unrelated.exists(), "an unowned file was removed")
 
     def test_generated_claude_agents_declare_all_four_axes(self):
         for name in ("impl-executor", "spec-validator", "quality-validator"):
@@ -303,36 +392,107 @@ class RenderTests(unittest.TestCase):
         self.assertIn("Allowed: no host-enforced tools.", text)
         self.assertNotIn("Allowed: .", text)
 
-    def test_empty_frontmatter_allowlist_is_omitted_not_empty(self):
-        """Test requirement (c): frontmatter allowlist field is omitted when empty.
+    def unmappable_allowlist_host(self):
+        """A host that enforces an allowlist and cannot map an allowed intent.
 
-        Test the format_allow_list helper function directly to verify it returns
-        None for an empty list in field mode, which causes the frontmatter line
-        to be skipped in render_markdown_yaml.
+        No shipped host is in this state — claude-code maps every portable
+        intent — so the case has to be constructed. It is not hypothetical:
+        this branch put hosts/codex.json into exactly this shape by dropping
+        read-files and search-files from tool_map, and codex is only spared
+        because it declares no allowlist.
         """
-        # Test the helper function directly
-        empty_list = []
-        field_value = render_agents.format_allow_list(empty_list, mode="field")
-        self.assertIsNone(field_value,
-                         "format_allow_list should return None for empty list in field mode")
+        host = json.loads(json.dumps(render_agents.load_host("claude-code")))
+        host["tool_map"].pop("read-files")
+        host["tool_map"].pop("search-files")
+        return host
 
-        # Test with non-empty list to verify normal case still works
-        non_empty = ["tool1", "tool2"]
-        field_value = render_agents.format_allow_list(non_empty, mode="field")
-        self.assertEqual(field_value, "tool1, tool2",
-                        "format_allow_list should join non-empty lists")
+    def test_unmappable_intent_on_an_allowlist_host_is_a_rendering_error(self):
+        """An empty grant must never render as a full one.
 
-        # Verify the actual rendering by checking spec-validator.toml doesn't have
-        # a tools field (or any empty field) in its frontmatter
-        with tempfile.TemporaryDirectory() as tmp:
-            run(SCRIPTS / "render_agents.py",
-                ["--host", "codex", "--out", tmp])
-            text = (Path(tmp) / "spec-validator.toml").read_text(encoding="utf-8")
-            # TOML format: there should be no "tools = " line since the mapped allow list is empty
-            # and codex doesn't support tool_allowlist anyway, but we're testing the logic
-            # that would prevent an empty field if it were supported
-            self.assertNotIn("tools = \"\"", text,
-                           "Should not have empty tools field")
+        hosts/claude-code.json records the host behaviour that makes this
+        load-bearing: "omitting it inherits every available tool". So an
+        omitted `tools` line is not a tidy way to express an empty allow
+        list, it is the opposite of one — and because read_only_enforced
+        points at the same `tools` field, omitting it also drops read-only
+        enforcement for the validator roles. Emitting the field empty is
+        malformed instead. Neither is acceptable, so the render fails, which
+        is what schemas/agent-role.schema.json already calls for: "a
+        rendering error, not a silent drop".
+        """
+        host = self.unmappable_allowlist_host()
+        role_file, role = next((f, r) for f, r in render_agents.load_roles()
+                               if r["id"] == "spec-validator")
+        with self.assertRaises(SystemExit) as caught:
+            render_agents.render_markdown_yaml(role, host, role_file)
+        message = str(caught.exception)
+        self.assertIn("spec-validator", message)
+        self.assertIn("read-files", message)
+        self.assertIn("grant every tool", message)
+
+    def test_allowlist_host_never_renders_a_frontmatter_without_the_field(self):
+        """The failure above is what stops the permissive file being written.
+
+        Guards the outcome rather than the mechanism: on a host that enforces
+        an allowlist, every generated agent carries the field. A future
+        refactor that "helpfully" omits it again fails here even if it stops
+        raising.
+        """
+        host = render_agents.load_host("claude-code")
+        field = host["capabilities"]["tool_allowlist"]["field"]
+        for role_file, role in render_agents.load_roles():
+            with self.subTest(role=role["id"]):
+                text = render_agents.render_markdown_yaml(role, host, role_file)
+                head = text.split("---")[1]
+                self.assertRegex(head, r"(?m)^%s: \S" % field)
+
+    def test_generated_toml_escapes_a_hostile_plugin_root(self):
+        """The plugin root is the one part of the body nobody in this repo owns.
+
+        It comes from whoever runs install_codex.py, and it lands inside a
+        TOML multi-line basic string, which processes backslash escapes and
+        ends at the first triple quote. This assertion needs no TOML parser,
+        so unlike the tomllib case below it actually runs on Python 3.10.
+        """
+        host = render_agents.load_host("codex")
+        role_file, role = render_agents.load_roles()[0]
+        for bad in ('/tmp/a"""root', "/tmp/a\\troot", '/tmp/pl"ain',
+                    '/tmp/end"""'):
+            with self.subTest(plugin_root=bad):
+                text = render_agents.render_toml(
+                    role, dict(host, root_placeholder=bad), role_file)
+                body = text.split('developer_instructions = """\n', 1)[1]
+                body = body.rsplit('\n"""', 1)[0]
+                self.assertNotIn('"""', body,
+                                 "an unescaped triple quote ends the string "
+                                 "early and turns instructions into TOML")
+                # Every backslash must open one of the two escapes this
+                # renderer emits. Any other sequence is raw input that TOML
+                # will reinterpret — \t becoming a tab is how the path stops
+                # resolving. Pairs are consumed so the second character of
+                # \\ is not read as opening an escape of its own.
+                index = 0
+                while index < len(body):
+                    if body[index] != "\\":
+                        index += 1
+                        continue
+                    self.assertIn(
+                        body[index + 1:index + 2], ("\\", '"'),
+                        "unescaped backslash at %d: TOML will reinterpret "
+                        "%r" % (index, body[index:index + 8]))
+                    index += 2
+
+    def test_generated_toml_round_trips_a_hostile_plugin_root(self):
+        """Same cases, checked against a real parser where one exists."""
+        tomllib = self.toml_parser()
+        host = render_agents.load_host("codex")
+        role_file, role = render_agents.load_roles()[0]
+        for bad in ('/tmp/a"""root', "/tmp/a\\troot", '/tmp/pl"ain'):
+            with self.subTest(plugin_root=bad):
+                text = render_agents.render_toml(
+                    role, dict(host, root_placeholder=bad), role_file)
+                parsed = tomllib.loads(text)
+                self.assertIn(bad, parsed["developer_instructions"],
+                              "the path must survive TOML unescaping intact")
 
 
 class CheckReturnTests(unittest.TestCase):
@@ -1346,6 +1506,98 @@ class WorkerGitGuardTests(unittest.TestCase):
         self.assertEqual(
             self.call("quality-validator", "python3 -m unittest x").returncode, 0)
         self.assertEqual(self.call("quality-validator", tool="Write").returncode, 2)
+
+    def raw(self, payload, stdout=None):
+        """Drive the hook with an arbitrary stdin body and stdout target."""
+        return subprocess.run(
+            [sys.executable, str(HOOKS / "worker_git_guard.py")],
+            input=payload, capture_output=stdout is None, stdout=stdout,
+            stderr=subprocess.DEVNULL if stdout is not None else None,
+            text=True)
+
+    def unwritable_stdout(self):
+        """See RootWriteGuardTests.unwritable_stdout — same stand-in, same why."""
+        try:
+            return open("/dev/full", "w")
+        except OSError:
+            self.skipTest("/dev/full is not available in this environment")
+
+    def test_denial_exits_2_when_stdout_cannot_be_written(self):
+        """The same load-bearing invariant root_write_guard already holds.
+
+        This guard has proven the call is a worker reaching for Git. If
+        reporting that denial fails, the denial still stands. Exit 1 (the
+        OSError escaping an unhandled print) and exit 120 (an OSError
+        surfacing at interpreter-shutdown flush after sys.exit(2)) are both
+        fail-open, and both are failures here.
+        """
+        with self.unwritable_stdout() as devfull:
+            for unbuffered in (True, False):
+                for command in ("git commit -m x", "git push"):
+                    with self.subTest(unbuffered=unbuffered, command=command):
+                        env = dict(os.environ)
+                        if unbuffered:
+                            env["PYTHONUNBUFFERED"] = "1"
+                        else:
+                            env.pop("PYTHONUNBUFFERED", None)
+                        payload = json.dumps({
+                            "agent_type": "impl-executor", "tool_name": "Bash",
+                            "tool_input": {"command": command}})
+                        result = subprocess.run(
+                            [sys.executable, str(HOOKS / "worker_git_guard.py")],
+                            input=payload, text=True, env=env,
+                            stdout=devfull, stderr=subprocess.DEVNULL)
+                        self.assertEqual(result.returncode, 2)
+
+    def test_validator_edit_denial_also_survives_an_unwritable_stdout(self):
+        with self.unwritable_stdout() as devfull:
+            payload = json.dumps({"agent_type": "spec-validator",
+                                  "tool_name": "Edit",
+                                  "tool_input": {"file_path": "x.py"}})
+            result = subprocess.run(
+                [sys.executable, str(HOOKS / "worker_git_guard.py")],
+                input=payload, text=True, stdout=devfull,
+                stderr=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 2)
+
+    def test_no_payload_shape_produces_a_traceback(self):
+        """Every input exits 0 or 2. Exit 1 is a non-blocking allow by accident.
+
+        Malformed hook *input* allows: without a readable agent_type there is
+        no evidence of a worker, and denying would block root's own shell,
+        which the protocol's stop conditions rely on for recovery. Malformed
+        state *inside* a proven worker denies.
+        """
+        cases = [
+            ("not json at all", 0),
+            ("[1, 2, 3]", 0),
+            ('"a bare string"', 0),
+            ("null", 0),
+            (json.dumps({"agent_type": [1], "tool_name": "Bash",
+                         "tool_input": {"command": "git push"}}), 0),
+            (json.dumps({"agent_type": 7, "tool_name": "Bash",
+                         "tool_input": {"command": "git push"}}), 0),
+            (json.dumps({"tool_name": "Bash",
+                         "tool_input": {"command": "git commit"}}), 0),
+            (json.dumps({"agent_type": "impl-executor",
+                         "tool_name": ["Bash"], "tool_input": {}}), 2),
+            (json.dumps({"agent_type": "impl-executor",
+                         "tool_name": {"a": 1}, "tool_input": {}}), 2),
+            (json.dumps({"agent_type": "spec-validator",
+                         "tool_name": None, "tool_input": {}}), 2),
+            (json.dumps({"agent_type": "impl-executor", "tool_name": "Bash",
+                         "tool_input": [1, 2]}), 2),
+            (json.dumps({"agent_type": "impl-executor", "tool_name": "Bash",
+                         "tool_input": "a string"}), 2),
+        ]
+        for payload, expected in cases:
+            with self.subTest(payload=payload[:60]):
+                result = self.raw(payload)
+                self.assertIn(result.returncode, (0, 2),
+                              "exit %s is neither a clean allow nor a block; "
+                              "stderr:\n%s" % (result.returncode, result.stderr))
+                self.assertEqual(result.returncode, expected)
+                self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":

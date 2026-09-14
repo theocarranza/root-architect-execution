@@ -75,7 +75,8 @@ def _dispatch_files(directory):
 
 
 def _validate_dispatch(data, schema_path):
-    """Validate dispatch data against schema, raising DispatchStateError on failure.
+    """Validate data against a schema file, raising DispatchStateError when the
+    *schema* is unusable (bad data comes back as a returned error list).
 
     Catches FileNotFoundError from a missing root schema file, OSError/ValueError
     (including json.JSONDecodeError, a ValueError subclass) from a root schema
@@ -168,8 +169,23 @@ def _fail(message):
 
 
 def cmd_open(args):
-    brief = json.loads(Path(args.brief).read_text(encoding="utf-8"))
-    errors = Validator(SCHEMAS / "brief.schema.json").validate(brief)
+    # The last un-wrapped read in this script. Every other entry point turns a
+    # bad file into "blocked: ..."; a traceback here is still a refusal to
+    # open, but it does not say which of the two files was at fault.
+    try:
+        brief = json.loads(Path(args.brief).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return _fail("cannot read brief %s: %s" % (args.brief, e))
+
+    if not isinstance(brief, dict):
+        return _fail("brief %s is not a JSON object (got %s)"
+                     % (args.brief, type(brief).__name__))
+
+    try:
+        errors = _validate_dispatch(brief, SCHEMAS / "brief.schema.json")
+    except DispatchStateError as e:
+        return _fail("brief schema is unusable: %s" % e)
+
     if brief.get("attempt", 1) > 1 and not brief.get("escalation_reason"):
         errors.append("$.escalation_reason: required once attempt > 1")
     if errors:

@@ -16,6 +16,26 @@ sys.path.insert(0, str(HERE))
 import render_agents  # noqa: E402
 
 
+def owned_name(value):
+    """A marker entry is usable only if it names a file directly in target.
+
+    The marker is a plain JSON file sitting inside the agent directory, so it
+    is exactly as trustworthy as that directory — and the documented target,
+    `.codex/agents`, lives inside the consuming project, where a clone can
+    carry one in. An entry containing a separator or `..` would make this
+    installer unlink a file it never wrote and does not own, anywhere the
+    user can reach. Only a bare filename is accepted; everything else is
+    skipped rather than deleted.
+    """
+    if not isinstance(value, str):
+        return None
+    if value in ("", ".", "..") or "\x00" in value:
+        return None
+    if "/" in value or "\\" in value or value != Path(value).name:
+        return None
+    return value
+
+
 def materialize(target, plugin_root=ROOT):
     host = render_agents.load_host("codex")
     roles = render_agents.load_roles()
@@ -40,11 +60,17 @@ def materialize(target, plugin_root=ROOT):
     if marker.exists():
         try:
             state = json.loads(marker.read_text(encoding="utf-8"))
-            previous = set(state.get("files", []))
-        except (OSError, ValueError, AttributeError):
+            recorded = state.get("files", []) if isinstance(state, dict) else []
+            if isinstance(recorded, list):
+                previous = {name for name in recorded if owned_name(name)}
+        except (OSError, ValueError, TypeError, AttributeError):
             previous = set()
-    for name in previous - expected:
+    for name in sorted(previous - expected):
         candidate = target / name
+        # Belt-and-braces behind owned_name: confirm the path this installer
+        # is about to unlink really sits in the directory it owns.
+        if candidate.parent.resolve() != target:
+            continue
         if candidate.is_file():
             candidate.unlink()
     marker.write_text(json.dumps({"version": 1, "files": sorted(expected)},
