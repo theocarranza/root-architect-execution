@@ -149,6 +149,14 @@ That last point is the outcome gate's own rule applied to this repo: a test
 suite only checks what it was written to check, and generated output is exactly
 the kind of artifact it can miss.
 
+`.github/workflows/outcome-gate.yml` runs all five on every push and pull
+request, so the gate no longer depends on a contributor remembering it. Run
+them locally anyway — CI is the backstop, not the first line. The workflow
+refuses to run as root: the five tests that prove an unreadable dispatch state
+denies do it with `chmod 000`, root bypasses permission bits, and a suite that
+skips them still reports `OK`. A gate that passes on 120 of 125 tests without
+saying so is the fail-open this repo's guards exist to close.
+
 ## What the hooks enforce
 
 **`root_write_guard.py`** refuses a root-session `Edit`/`Write` on a path the
