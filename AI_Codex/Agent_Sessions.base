@@ -1,0 +1,25 @@
+filters:
+  and:
+    - file.inFolder("Agent_Sessions")
+    - file.ext == "md"
+    - file.name != "README"
+properties:
+  date:
+    displayName: Date
+  status:
+    displayName: Status
+  branch:
+    displayName: Branch
+views:
+  - type: table
+    name: Recent
+    order: [date, file.name, status, branch]
+    sort:
+      - property: date
+        direction: DESC
+  - type: table
+    name: Open
+    filters:
+      and:
+        - status == "active"
+    order: [date, file.name, branch]

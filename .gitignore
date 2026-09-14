@@ -4,7 +4,16 @@ __pycache__/
 # Runtime dispatch state; belongs to a workspace being driven, never to this repo.
 .root-architect/
 
-# Workspace session bookkeeping. The codex-workflows-plugin session gate
-# creates this at <cwd>/AI_Codex before it will allow writes; like
-# .root-architect/ above, it belongs to the workspace being driven, not here.
-AI_Codex/
+# Re-include the vault. ~/.gitignore_global also lists `AI_Codex/`, which covers
+# every project on this machine, so dropping the entry here was not enough — this
+# negation is what overrides it, and only for this repository.
+!AI_Codex/
+
+# AI_Codex/ is deliberately NOT ignored. It began as session bookkeeping the
+# codex-workflows-plugin gate creates at <cwd>/AI_Codex, and was ignored on the
+# same reasoning as .root-architect/ above. It is now an agent-continuity
+# software-project vault, and the distinction that matters is run state versus
+# knowledge: .root-architect/ holds the state of a run, which is worthless to a
+# clone, while the vault holds why the guards fail closed, what each host
+# actually enforces, and which decisions are already settled — none of which
+# survived a clone while this was ignored.
