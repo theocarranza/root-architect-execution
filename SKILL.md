@@ -68,14 +68,34 @@ Open a session ledger. Run the plan-named baseline commands, checkpoint, make
 one bootstrap commit, and file the first owner report from
 [references/contracts.md](references/contracts.md).
 
-Then run the capability gate before dispatching anything:
+Then run the capability gate before dispatching anything. Select the host
+explicitly; Codex must not run the Claude gate:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_roles.py"
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" --host claude-code --check
+if [ "${RAE_HOST:-claude-code}" = "codex" ]; then
+  python3 "$PLUGIN_ROOT/scripts/validate_roles.py" --host codex
+  python3 "$PLUGIN_ROOT/scripts/render_agents.py" --host codex --check
+else
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_roles.py"
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" --host claude-code --check
+fi
 ```
 
 ## Gates
+
+On Codex, set `RAE_HOST=codex` and `PLUGIN_ROOT` to the installed plugin root.
+Codex plugin installation copies the bundle but does not provide a
+documented post-install callback for custom agents, so activate them explicitly:
+
+```bash
+python3 "$PLUGIN_ROOT/scripts/validate_roles.py" --host codex
+python3 "$PLUGIN_ROOT/scripts/install_codex.py" --target .codex/agents --plugin-root "$PLUGIN_ROOT"
+```
+
+The bootstrap is idempotent and keeps generated agents out of the source tree.
+Codex cannot hook-enforce root-versus-worker write separation because its
+PreToolUse payload does not document worker identity; that boundary is
+instructional and review-based. Claude retains its identity-aware write guard.
 
 Each gate is a hard stop, in order. Nothing advances past a gate that has not
 been observed to pass.

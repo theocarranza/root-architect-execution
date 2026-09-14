@@ -1,7 +1,7 @@
 {
   "host": "codex",
-  "verified_on": "2026-09-04",
-  "source": "INHERITED, NOT RE-VERIFIED. Carried from the orchestration-quality-control host capability matrix dated 2026-09-04 and its shipped .codex agent TOML files. The Claude row of that same matrix was found wrong on 2026-09-07, so treat these rows as a starting point and re-verify against Codex's own documentation before relying on a disclosure produced from them.",
+  "verified_on": "2026-09-08",
+  "source": "OpenAI Codex subagents and hooks documentation: https://developers.openai.com/codex/subagents and https://developers.openai.com/codex/hooks; validated against codex-cli 0.147.0.",
   "agent_dir": ".codex/agents",
   "bundled_dir": "dist/codex",
   "format": "toml",
@@ -11,20 +11,14 @@
     "developer_instructions"
   ],
   "tool_map": {
-    "read-files": [
-      "fs.read"
-    ],
-    "search-files": [
-      "fs.read"
-    ],
     "edit-files": [
-      "fs.write"
+      "apply_patch"
     ],
     "create-files": [
-      "fs.write"
+      "apply_patch"
     ],
     "run-commands": [
-      "shell"
+      "Bash"
     ]
   },
   "model_map": {
@@ -36,8 +30,8 @@
     "low": "low",
     "medium": "medium",
     "high": "high",
-    "xhigh": "high",
-    "max": "high"
+    "xhigh": "xhigh",
+    "max": "max"
   },
   "capabilities": {
     "explicit_model": {
@@ -48,7 +42,7 @@
     "reasoning_effort": {
       "supported": true,
       "field": "model_reasoning_effort",
-      "verified": "Documented per-agent key. Its scale is coarser than this plugin's, so effort_map folds xhigh and max onto high; the renderer discloses the fold rather than implying a level Codex never applied."
+      "verified": "Documented per-agent key. Supported GPT models expose low, medium, high, xhigh, and max; the selected model determines which levels are accepted."
     },
     "tool_allowlist": {
       "supported": false,
@@ -63,12 +57,12 @@
     "read_only_enforced": {
       "supported": true,
       "field": "sandbox_mode",
-      "verified": "sandbox_mode = \"read-only\" is enforced by the host sandbox rather than by instruction. This is the one capability Codex enforces more strongly than a tool allowlist can."
+      "verified": "sandbox_mode = \"read-only\" is enforced by the host sandbox. A parent session's live sandbox or approval policy can still override a custom agent default, so this is not an absolute project policy boundary."
     },
     "scoped_hooks": {
       "supported": false,
       "field": null,
-      "verified": "No per-agent hook mechanism is documented."
+      "verified": "No per-agent hook mechanism is documented. Codex PreToolUse payloads do not document worker identity, so root-versus-worker write separation is instructional and review-based, not hook-enforced."
     }
   }
 }

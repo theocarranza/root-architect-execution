@@ -77,6 +77,25 @@ def load_host(name):
     return host
 
 
+def format_allow_list(allow, mode="prose"):
+    """Format an allow list for prose or frontmatter rendering.
+
+    Args:
+        allow: List of tool names
+        mode: "prose" for prose text, "field" for frontmatter field value
+
+    Returns:
+        For prose: comma-separated tools or "no host-enforced tools" if empty
+        For field: comma-separated tools or None if empty (to omit the field)
+    """
+    if mode == "prose":
+        return ", ".join(allow) if allow else "no host-enforced tools"
+    elif mode == "field":
+        return ", ".join(allow) if allow else None
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+
 def resolve_tools(role, host):
     """Map portable intents to host tool names, collecting what cannot map."""
     tool_map = host["tool_map"]
@@ -118,6 +137,11 @@ def disclosures(role, host, unmappable):
             "Write scope is **never** host-enforced anywhere: no host limits "
             "edits to a brief's write paths. The boundary holds because the "
             "agent honours it and root reviews the diff against it.")
+        if host["host"] == "codex":
+            out.append(
+                "Codex does not document worker identity in PreToolUse, so its "
+                "root-versus-worker write separation is not hook-enforced; "
+                "root must review the materialized worker diff.")
     if not caps["reasoning_effort"]["supported"]:
         out.append(
             "Reasoning strength is not settable on this host. Record effort as "
@@ -162,7 +186,9 @@ def render_markdown_yaml(role, host, role_file):
             lines.append("%s: %s" % (caps["reasoning_effort"]["field"], effort))
 
     if caps["tool_allowlist"]["supported"]:
-        lines.append("%s: %s" % (caps["tool_allowlist"]["field"], ", ".join(allow)))
+        formatted = format_allow_list(allow, mode="field")
+        if formatted is not None:
+            lines.append("%s: %s" % (caps["tool_allowlist"]["field"], formatted))
     if caps["tool_denylist"]["supported"] and deny:
         lines.append("%s: %s" % (caps["tool_denylist"]["field"], ", ".join(deny)))
     if (role["mutation"] == "read-only"
@@ -189,7 +215,7 @@ def render_markdown_yaml(role, host, role_file):
 
     lines += ["## Grant", "",
               "Capability class: **%s**." % role["mutation"], ""]
-    lines.append("Allowed: %s." % ", ".join(allow))
+    lines.append("Allowed: %s." % format_allow_list(allow, mode="prose"))
     if deny:
         lines.append("Denied: %s." % ", ".join(deny))
     if role["tools"].get("shell_purpose"):
@@ -225,7 +251,7 @@ def render_toml(role, host, role_file):
         "",
         return_skeleton(role),
         "",
-        "Capability class: %s. Allowed: %s." % (role["mutation"], ", ".join(allow)),
+        "Capability class: %s. Allowed: %s." % (role["mutation"], format_allow_list(allow, mode="prose")),
     ]
     if deny:
         body.append("Denied: %s." % ", ".join(deny))
@@ -259,12 +285,18 @@ def main(argv=None):
     parser.add_argument("--out", default=None,
                         help="output directory; defaults to the host manifest's "
                              "agent_dir, resolved inside the plugin")
+    parser.add_argument("--root-placeholder", default=None,
+                        help="path used when generated instructions refer to the "
+                             "plugin root (installers should pass an absolute path)")
     parser.add_argument("--check", action="store_true",
                         help="regenerate in memory and fail if what is on disk "
                              "differs, instead of writing")
     args = parser.parse_args(argv)
 
     host = load_host(args.host)
+    if args.root_placeholder is not None:
+        host = dict(host)
+        host["root_placeholder"] = args.root_placeholder
     out_dir = Path(args.out) if args.out else ROOT / host["bundled_dir"]
     extension = ".toml" if host["format"] == "toml" else ".md"
     render = render_toml if host["format"] == "toml" else render_markdown_yaml

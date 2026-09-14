@@ -111,13 +111,13 @@ def main():
                 "read-only with no shell. Reaching one means the tool grant "
                 "leaked. If a command needs running, that is the quality "
                 "validator's job — record it as a finding instead.")
-        if tool in {"Edit", "Write", "NotebookEdit", "MultiEdit"}:
+        if tool in {"Edit", "Write", "NotebookEdit", "MultiEdit", "apply_patch"}:
             _deny("Worker guard: the plan-compliance validator fixes nothing. "
                   "Report a finding; root re-briefs the implementer.")
         _allow()
 
     if role == "quality-validator" and tool in {"Edit", "Write", "NotebookEdit",
-                                                "MultiEdit"}:
+                                                "MultiEdit", "apply_patch"}:
         _deny("Worker guard: the quality validator fixes nothing. Report the "
               "defect with a concrete failure scenario; root re-briefs the "
               "implementer.")

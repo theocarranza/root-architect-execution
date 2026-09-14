@@ -10,6 +10,25 @@ PreToolUse hooks that enforce the two rules prose never managed to.
 
 ## Install
 
+### Codex
+
+Codex plugin installation copies the bundle but does not automatically
+materialize this repository's custom agent TOMLs. After installing, activate
+the agents explicitly:
+
+```bash
+codex plugin add /path/to/root-architect-execution
+python3 /path/to/root-architect-execution/scripts/install_codex.py \
+  --target .codex/agents \
+  --plugin-root /path/to/root-architect-execution
+```
+
+The bootstrap is idempotent, resolves references to the installed plugin copy,
+and never writes generated agents into the source repository.
+Codex does not document worker identity in `PreToolUse`, so root-versus-worker
+write separation is instructional and enforced by root's diff review. Claude's
+identity-aware write guard remains active.
+
 The plugin ships its own marketplace manifest, so installing is two commands:
 register the marketplace, then install from it.
 

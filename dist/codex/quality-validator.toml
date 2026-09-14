@@ -30,13 +30,13 @@ Return exactly one fenced json block in this shape, and nothing else. Placeholde
   ]
 }
 
-Capability class: read-and-run. Allowed: fs.read, shell.
-Denied: fs.write.
+Capability class: read-and-run. Allowed: Bash.
+Denied: apply_patch.
 Shell purpose: Rerun exactly the acceptance commands the brief names and report the counts observed. Never to write, stage, or commit.
 You must never: ask-owner, commit, edit-files, handoff-to-peer, spawn-agents, stage, widen-scope.
 
 Not enforced by this host:
 - Tool grant is not enforced on this host: codex has no per-agent tool allowlist, so the grant stated above is an instruction only.
-- This host's effort scale is coarser than the manifest's: xhigh is applied as high.
+- These portable tool intents have no mapping on this host and are instructions only: read-files, search-files.
 - Per-agent hooks are unavailable on this host, so the prohibitions stated above rely on session-wide hooks or on the agent's own compliance.
 """

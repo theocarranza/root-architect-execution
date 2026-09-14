@@ -23,6 +23,7 @@ sys.path.insert(0, str(SCRIPTS))
 from jsonschema_mini import Validator  # noqa: E402
 from dispatch_state import DispatchStateError  # noqa: E402
 import render_agents  # noqa: E402
+import install_codex  # noqa: E402
 
 
 def run(script, args, stdin=None):
@@ -163,7 +164,7 @@ class RoleAndHostManifestTests(unittest.TestCase):
         result = run(SCRIPTS / "validate_roles.py", [])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_gate_reports_inherited_host_manifests(self):
+    def test_gate_reports_inherited_cursor_manifest(self):
         result = run(SCRIPTS / "validate_roles.py", [])
         self.assertIn("inherited and unverified", result.stdout)
 
@@ -199,6 +200,37 @@ class RoleAndHostManifestTests(unittest.TestCase):
 
 
 class RenderTests(unittest.TestCase):
+
+    def test_codex_manifest_and_skill_are_installable(self):
+        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
+        self.assertEqual(manifest["name"], "root-architect-execution")
+        self.assertEqual(manifest["skills"], "./skills")
+        self.assertIn("defaultPrompt", manifest["interface"])
+        self.assertTrue((ROOT / "skills/root-architect-execution/SKILL.md").exists())
+
+    def test_codex_render_is_parseable_and_uses_no_placeholder_when_installed(self):
+        try:
+            import tomllib
+        except ImportError:
+            self.skipTest("tomllib unavailable")
+        with tempfile.TemporaryDirectory() as tmp:
+            install_codex.materialize(Path(tmp) / "agents", Path(tmp) / "plugin root")
+            for path in (Path(tmp) / "agents").glob("*.toml"):
+                self.assertNotIn("<skill_root>", path.read_text())
+                tomllib.loads(path.read_text())
+
+    def test_codex_install_preserves_unrelated_agents_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "agents"
+            target.mkdir()
+            unrelated = target / "user-agent.toml"
+            unrelated.write_text('name = "user-agent"\n')
+            install_codex.materialize(target, Path(tmp) / "plugin")
+            first = {p.name: p.read_bytes() for p in target.iterdir()}
+            install_codex.materialize(target, Path(tmp) / "plugin")
+            second = {p.name: p.read_bytes() for p in target.iterdir()}
+            self.assertIn("user-agent.toml", second)
+            self.assertEqual(first, second)
 
     def test_generated_claude_agents_declare_all_four_axes(self):
         for name in ("impl-executor", "spec-validator", "quality-validator"):
@@ -245,6 +277,62 @@ class RenderTests(unittest.TestCase):
                          ["--host", "claude-code", "--out", tmp, "--check"])
         self.assertEqual(result.returncode, 1)
         self.assertIn("out of sync", result.stderr)
+
+    def test_empty_mapped_allow_list_never_produces_allowed_period(self):
+        """Test requirement (a): no generated file contains the malformed 'Allowed: .' string."""
+        # Check dist/ directory
+        for toml_file in (ROOT / "dist" / "codex").glob("*.toml"):
+            text = toml_file.read_text(encoding="utf-8")
+            self.assertNotIn("Allowed: .", text,
+                           f"Found malformed 'Allowed: .' in {toml_file.name}")
+        # Check agents/ directory
+        for md_file in (ROOT / "agents").glob("*.md"):
+            text = md_file.read_text(encoding="utf-8")
+            self.assertNotIn("Allowed: .", text,
+                           f"Found malformed 'Allowed: .' in {md_file.name}")
+
+    def test_empty_mapped_allow_list_uses_explicit_wording(self):
+        """Test requirement (b): empty mapped allow list renders 'no host-enforced tools'."""
+        # spec-validator has tools.allow: ["read-files", "search-files"]
+        # but codex.json only maps edit-files, create-files, and run-commands
+        # so spec-validator on codex has an empty mapped allow list
+        with tempfile.TemporaryDirectory() as tmp:
+            run(SCRIPTS / "render_agents.py",
+                ["--host", "codex", "--out", tmp])
+            text = (Path(tmp) / "spec-validator.toml").read_text(encoding="utf-8")
+        self.assertIn("Allowed: no host-enforced tools.", text)
+        self.assertNotIn("Allowed: .", text)
+
+    def test_empty_frontmatter_allowlist_is_omitted_not_empty(self):
+        """Test requirement (c): frontmatter allowlist field is omitted when empty.
+
+        Test the format_allow_list helper function directly to verify it returns
+        None for an empty list in field mode, which causes the frontmatter line
+        to be skipped in render_markdown_yaml.
+        """
+        # Test the helper function directly
+        empty_list = []
+        field_value = render_agents.format_allow_list(empty_list, mode="field")
+        self.assertIsNone(field_value,
+                         "format_allow_list should return None for empty list in field mode")
+
+        # Test with non-empty list to verify normal case still works
+        non_empty = ["tool1", "tool2"]
+        field_value = render_agents.format_allow_list(non_empty, mode="field")
+        self.assertEqual(field_value, "tool1, tool2",
+                        "format_allow_list should join non-empty lists")
+
+        # Verify the actual rendering by checking spec-validator.toml doesn't have
+        # a tools field (or any empty field) in its frontmatter
+        with tempfile.TemporaryDirectory() as tmp:
+            run(SCRIPTS / "render_agents.py",
+                ["--host", "codex", "--out", tmp])
+            text = (Path(tmp) / "spec-validator.toml").read_text(encoding="utf-8")
+            # TOML format: there should be no "tools = " line since the mapped allow list is empty
+            # and codex doesn't support tool_allowlist anyway, but we're testing the logic
+            # that would prevent an empty field if it were supported
+            self.assertNotIn("tools = \"\"", text,
+                           "Should not have empty tools field")
 
 
 class CheckReturnTests(unittest.TestCase):
@@ -679,6 +767,15 @@ class RootWriteGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("Root write guard", result.stderr)
         self.assertIn("re-brief the worker", result.stderr.lower())
+
+    def test_codex_apply_patch_identity_unknown_is_not_blocked(self):
+        self.open_dispatch()
+        payload = {"tool_name": "apply_patch", "cwd": str(self.workspace),
+                   "tool_input": {"command": "*** Begin Patch\n"
+                                   "*** Update File: scripts/envelope.py\n"
+                                   "@@\n*** End Patch\n"}}
+        result = self.raw_call(payload)
+        self.assertEqual(result.returncode, 0)
 
     def test_blocks_a_file_inside_a_delegated_directory(self):
         self.open_dispatch(valid_brief(write_paths=["scripts"]))

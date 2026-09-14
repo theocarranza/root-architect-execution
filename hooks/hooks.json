@@ -13,7 +13,7 @@
         ]
       },
       {
-        "matcher": "Bash|BashOutput|KillShell|PowerShell|Edit|Write|NotebookEdit|MultiEdit",
+        "matcher": "Bash|BashOutput|KillShell|PowerShell|Edit|Write|NotebookEdit|MultiEdit|apply_patch",
         "hooks": [
           {
             "type": "command",
