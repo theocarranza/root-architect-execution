@@ -18,6 +18,15 @@ Sequencing status, against the four steps below:
    assembles `dist/claude-code/` from `adapters/claude-code/layout.json` plus
    the repository core, and `--check` rebuilds into a temporary directory and
    compares byte for byte. It is in the outcome gate and in CI.
+
+   Joined by `scripts/smoke_install.py`, which closes a gap the byte gate
+   cannot: `--check` proves the bundle was *copied* correctly and says nothing
+   about whether the host will *load* it. The smoke gate installs the built
+   bundle into a throwaway HOME and requires the host to report back every
+   role in `roles/` as an agent, the skill as a skill, and every event in
+   `hooks/hooks.json` as registered with its script present. Standing gate on
+   every PR, in CI with `--require-cli` so an absent CLI fails rather than
+   skips.
 3. Move mechanics into `adapters/claude-code/` — **not started**. The gate
    that makes it safe now exists, which was the whole point of the ordering.
 4. Move Codex, then Cursor — **not started**.
@@ -214,7 +223,11 @@ against a re-render, so a reviewer sees the artifact that ships. Introducing
 
 OQC's `BUILD-MANIFEST.json` is the right instinct but is not sufficient on its
 own: a path→hash list proves a bundle is internally consistent, not that it
-agrees with the source it claims to come from. The gate we need is a rebuild into
+agrees with the source it claims to come from. Nor, it turns out, is a byte
+comparison sufficient on its own either — it proves agreement with the source
+and still says nothing about whether the host accepts the result. Both gates
+are needed, and they fail on different things: probing found breakages each one
+catches and the other does not. The gate we need is a rebuild into
 a temporary directory and a byte comparison against `dist/`, exactly as
 `render_agents.py --check` already does for agent files. Until that exists, this
 migration would trade a guarantee we currently have for convenience — which is

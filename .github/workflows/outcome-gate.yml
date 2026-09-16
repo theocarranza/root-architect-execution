@@ -77,6 +77,10 @@ jobs:
         with:
           node-version: "22"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install the Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
@@ -85,3 +89,9 @@ jobs:
       # and left the marketplace entry behind, and only this caught it.
       - name: Validate the plugin manifest
         run: claude plugin validate .
+
+      # The only gate that runs the host against the artifact. --require-cli so
+      # a runner without the CLI fails here rather than skipping quietly, which
+      # would be a gate reporting success for work it never did.
+      - name: Built bundle installs and its parts resolve
+        run: python3 scripts/smoke_install.py --host claude-code --require-cli
