@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://root-architect-execution/schemas/brief.schema.json",
+  "title": "Dispatch brief",
+  "description": "Everything one worker is given. Root authors it before dispatch and writes it to the dispatch state file, which is what the hooks read. A brief is self-contained by construction: a worker that needs context the brief does not carry returns NEEDS_CONTEXT rather than exploring.",
+  "type": "object",
+  "required": ["task", "attempt", "max_attempts", "role", "model", "effort", "read_paths", "write_paths", "acceptance", "constraints", "owner_owned_paths", "expected_result"],
+  "additionalProperties": false,
+  "properties": {
+    "task": { "type": "string", "minLength": 1 },
+    "attempt": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "max_attempts": { "const": 3 },
+    "role": {
+      "type": "string",
+      "enum": ["implementer", "spec-validator", "quality-validator"]
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The explicit host model id actually passed at spawn. Never 'inherit', and never left unset: every host defaults to the parent's model."
+    },
+    "effort": {
+      "type": "string",
+      "description": "The effort level actually applied, or the literal 'not settable on this host'. Naming a level nothing applied is a false claim about the run.",
+      "anyOf": [
+        { "enum": ["low", "medium", "high", "xhigh", "max"] },
+        { "const": "not settable on this host" }
+      ]
+    },
+    "escalation_reason": {
+      "type": "string",
+      "description": "Required by scripts/check_return.py whenever attempt > 1: the recorded evidence of the previous failure that justifies this tier. Escalation without a recorded reason is a hunch."
+    },
+    "read_paths": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/relPath" }
+    },
+    "write_paths": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/relPath" },
+      "description": "The only paths the worker may create or edit, and the exact set the root write guard hook protects from root's own edits while this dispatch is open. Empty for both validator roles."
+    },
+    "interfaces": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Signatures and invariants the worker must hold to, so the next task is not forced into a breaking change."
+    },
+    "acceptance": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The commands that decide whether this task passed, each with the count the brief expects. Scoped to what the change can reach; the reachability argument belongs in constraints.",
+      "items": {
+        "type": "object",
+        "required": ["command", "expect"],
+        "additionalProperties": false,
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "expect": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "Must include the reachability argument for the acceptance scope. If you cannot argue what is unaffected, name the full baseline instead."
+    },
+    "owner_owned_paths": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/relPath" },
+      "description": "Dirty paths belonging to the owner or to another agent's in-flight work. Out of scope until the owner places one in a brief."
+    },
+    "expected_result": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "relPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\.\\.)(?!.*[\\x00-\\x1f\\x7f]).*$",
+      "description": "Workspace-relative. Never absolute, never containing '..' — the guard hooks compare resolved paths against this list and an escaping path would silently fall outside the protected set. Control characters (U+0000-U+001F, U+007F) are also rejected."
+    }
+  }
+}

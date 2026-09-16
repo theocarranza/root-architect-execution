@@ -6,6 +6,7 @@ suite — the mini validator is checked through the contracts that use it.
 
     python3 -m unittest discover -s tests -t .
 """
+import contextlib
 import json
 import os
 import shutil
@@ -24,6 +25,23 @@ from jsonschema_mini import Validator  # noqa: E402
 from dispatch_state import DispatchStateError  # noqa: E402
 import render_agents  # noqa: E402
 import install_codex  # noqa: E402
+import build_adapter  # noqa: E402
+
+
+@contextlib.contextmanager
+def mock_adapters(directory):
+    """Point build_adapter at a scratch adapters/ tree.
+
+    Tests never write into the real adapters/ directory; a build test
+    that mutates the repository is how a suite starts passing for the
+    wrong reason.
+    """
+    original = build_adapter.ADAPTERS
+    build_adapter.ADAPTERS = Path(directory)
+    try:
+        yield
+    finally:
+        build_adapter.ADAPTERS = original
 
 
 def run(script, args, stdin=None):
@@ -590,6 +608,126 @@ class RenderTests(unittest.TestCase):
                 self.assertIn("What this host **does** enforce", text)
                 self.assertIn("**ask-owner**", text)
                 self.assertIn("**spawn-agents**", text)
+
+class AdapterBuildTests(unittest.TestCase):
+    """ADR 0001 step 2: the bundle gate, which had to exist before step 3.
+
+    The ADR's stated risk is that "a build step means the thing reviewed stops
+    being the thing that runs". These tests are the argument that it does not.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.scratch = Path(self.tmp.name)
+
+    def build(self, host="claude-code", out=None):
+        return run(SCRIPTS / "build_adapter.py",
+                   ["--host", host, "--out", str(out or self.scratch / "bundle")])
+
+    def test_layout_matches_its_own_directory_and_schema(self):
+        for path in sorted((ROOT / "adapters").glob("*/layout.json")):
+            with self.subTest(adapter=path.parent.name):
+                layout = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(layout["host"], path.parent.name,
+                                 "a layout must not describe a host it is not filed under")
+                validator = Validator(ROOT / "schemas/adapter-layout.schema.json")
+                self.assertEqual(validator.validate(layout), [])
+
+    def test_build_produces_the_installable_shape(self):
+        out = self.scratch / "bundle"
+        result = self.build(out=out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The pieces an install actually needs.
+        for required in (".claude-plugin/plugin.json",
+                         ".claude-plugin/marketplace.json",
+                         "SKILL.md",
+                         "hooks/hooks.json",
+                         "agents/impl-executor.md"):
+            self.assertTrue((out / required).exists(), "missing %s" % required)
+
+    def test_build_carries_no_bytecode(self):
+        """__pycache__ in a shipped bundle is stale code waiting to be run."""
+        out = self.scratch / "bundle"
+        self.build(out=out)
+        strays = [p for p in out.rglob("*")
+                  if "__pycache__" in p.parts or p.suffix == ".pyc"]
+        self.assertEqual(strays, [])
+
+    def test_committed_bundle_matches_a_fresh_build(self):
+        result = run(SCRIPTS / "build_adapter.py",
+                     ["--host", "claude-code", "--check"])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("in sync", result.stdout)
+
+    def test_check_catches_a_source_change_that_was_never_rebuilt(self):
+        """The case a path -> hash manifest cannot catch.
+
+        A bundle built from stale sources hashes perfectly against itself. Only
+        a rebuild-and-compare proves the bundle agrees with the source it
+        claims to come from, which is why --check does that instead of
+        shipping a BUILD-MANIFEST.
+        """
+        out = self.scratch / "bundle"
+        self.build(out=out)
+        source = out / "scripts/check_return.py"
+        source.write_text(source.read_text(encoding="utf-8") + "\n# drift\n",
+                          encoding="utf-8")
+        missing, extra, differing = build_adapter.compare(
+            build_adapter.ROOT / "dist/claude-code", out)
+        self.assertIn(Path("scripts/check_return.py"), differing)
+
+    def test_check_separates_missing_from_extra_from_differing(self):
+        """Three different mistakes, and a reader needs to know which."""
+        left, right = self.scratch / "a", self.scratch / "b"
+        self.build(out=left)
+        self.build(out=right)
+        (right / "scripts/check_return.py").write_text("changed", encoding="utf-8")
+        (right / "extra.txt").write_text("x", encoding="utf-8")
+        (right / "SKILL.md").unlink()
+
+        missing, extra, differing = build_adapter.compare(left, right)
+        self.assertEqual(missing, [Path("SKILL.md")])
+        self.assertEqual(extra, [Path("extra.txt")])
+        self.assertEqual(differing, [Path("scripts/check_return.py")])
+
+    def test_a_layout_naming_a_missing_source_fails_loudly(self):
+        """A bundle silently short a file is an install that breaks later."""
+        adapter = self.scratch / "adapters" / "ghost"
+        adapter.mkdir(parents=True)
+        (adapter / "layout.json").write_text(json.dumps({
+            "host": "ghost", "bundle_root": ".",
+            "place": {"does-not-exist.md": "does-not-exist.md"},
+        }), encoding="utf-8")
+        with mock_adapters(adapter.parent):
+            with self.assertRaises(build_adapter.BuildError) as caught:
+                build_adapter.build("ghost", self.scratch / "out")
+        self.assertIn("neither", str(caught.exception))
+
+    def test_a_layout_whose_host_disagrees_is_refused(self):
+        adapter = self.scratch / "adapters" / "ghost"
+        adapter.mkdir(parents=True)
+        (adapter / "layout.json").write_text(json.dumps({
+            "host": "somewhere-else", "bundle_root": ".",
+            "place": {"SKILL.md": "SKILL.md"},
+        }), encoding="utf-8")
+        with mock_adapters(adapter.parent):
+            with self.assertRaises(build_adapter.BuildError) as caught:
+                build_adapter.load_layout("ghost")
+        self.assertIn("filed under", str(caught.exception))
+
+    def test_adapter_sources_win_over_repository_sources(self):
+        """The property that makes ADR 0001 step 3 a pure move.
+
+        Moving hooks/ into adapters/claude-code/hooks/ must not require
+        touching layout.json -- the adapter copy simply starts winning.
+        """
+        adapter = self.scratch / "adapters" / "claude-code"
+        adapter.mkdir(parents=True)
+        (adapter / "SKILL.md").write_text("adapter copy", encoding="utf-8")
+        with mock_adapters(adapter.parent):
+            resolved = build_adapter.resolve_source("claude-code", "SKILL.md")
+        self.assertEqual(resolved, adapter / "SKILL.md")
 
 class CheckReturnTests(unittest.TestCase):
 

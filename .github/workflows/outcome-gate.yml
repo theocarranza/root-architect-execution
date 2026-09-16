@@ -58,6 +58,12 @@ jobs:
           python3 scripts/render_agents.py --host codex --check
           python3 scripts/render_agents.py --host cursor --check
 
+      # The bundle gate, not just the agent files. A rebuild into a temp
+      # directory and a byte comparison, because a hash manifest cannot tell a
+      # stale bundle from a current one.
+      - name: Built bundle matches its sources
+        run: python3 scripts/build_adapter.py --host claude-code --check
+
       - name: Test suite
         run: python3 -m unittest discover -s tests -t .
 

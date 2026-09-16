@@ -202,7 +202,7 @@ plausible future source of malformed-return retries.
 
 ## 7. Errors and gaps in `hosts/claude-code.json`
 
-Six, ordered by how wrong they are. **1–3 are fixed as of 2026-09-16 (`9b3bf0a`); 4–6 remain open.**
+Six, ordered by how wrong they are. **1–3 are fixed (`9b3bf0a`). 4–6 are not errors but declined capabilities and a channel hazard; they are now recorded in `adapters/claude-code/README.md`, with the conditions for adopting each.**
 
 1. **FIXED — `scoped_hooks` was `supported: true, field: "hooks"`, and is false for this plugin.**
    Plugin-shipped agents ignore `hooks`. The row's own `verified` note already

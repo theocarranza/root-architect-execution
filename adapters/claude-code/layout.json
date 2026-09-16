@@ -1,0 +1,18 @@
+{
+  "host": "claude-code",
+  "bundle_root": ".",
+  "description": "Claude Code installs a marketplace directory source directly, so this host's bundle is the plugin itself with the development surface removed. bundle_root is '.' because marketplace.json declares source './'; a host that nests its plugin inside the bundle sets this to that subdirectory.",
+  "place": {
+    ".claude-plugin/": ".claude-plugin/",
+    "agents/": "agents/",
+    "hooks/": "hooks/",
+    "references/": "references/",
+    "schemas/": "schemas/",
+    "scripts/": "scripts/",
+    "SKILL.md": "SKILL.md"
+  },
+  "exclude": [
+    "**/__pycache__/**",
+    "**/*.pyc"
+  ]
+}
