@@ -10,8 +10,7 @@ created: 2026-09-14
 ## Status
 
 Proposed — 2026-09-14. Supersedes nothing. Blocks nothing; the corrections in
-`.root-architect/ledger/2026-09-14-claude-subagent-contract.md` §7 land first and
-independently.
+[[Claude Code Subagent Contract]] §7 land first and independently.
 
 ## Context
 
@@ -226,8 +225,7 @@ possible, not consequences of it.
 
 ## Sequencing
 
-1. Land the §7 corrections from
-   `.root-architect/ledger/2026-09-14-claude-subagent-contract.md` in the current
+1. Land the §7 corrections from [[Claude Code Subagent Contract]] in the current
    shape. They are false statements shipping today and must not wait for a
    migration.
 2. Write `--check` over a built bundle, against today's single-host output.
