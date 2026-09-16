@@ -13,9 +13,10 @@ retrieved: 2026-09-14
 What Claude Code's subagent system actually guarantees, and what it costs
 `hosts/claude-code.json`.
 
-Branch of origin: `fix/guard-fails-closed-on-untrusted-dispatch-state`. Research
-only — no code change was made and no dispatch was opened. `hosts/claude-code.json`
-still carries the errors named in §7.
+Branch of origin: `fix/guard-fails-closed-on-untrusted-dispatch-state`. Recorded
+as research on 2026-09-14, with no code change at the time. §7 findings 1–3 were
+corrected on 2026-09-16 in `9b3bf0a`; findings 4–6 are still open, and §8 says
+why they need a vocabulary the capability schema does not yet have.
 
 ## 1. Why this exists
 
@@ -73,7 +74,8 @@ Two consequences worth stating plainly:
 
 - Omitting `Agent` from `tools` is how you forbid spawning. That makes
   `must_not: spawn-agents` **host-enforced** on this host whenever `tools` is
-  written, not the instruction we currently disclose it as.
+  written. It was disclosed as mere instruction until `9b3bf0a`, which now
+  derives the enforcement from the grant itself.
 - A `disallowedTools` entry with a specifier is a trap for anyone who later tries
   to express "Bash but not `git push`" there. It would remove Bash entirely. The
   worker Git boundary has to stay in the PreToolUse hook; the denylist cannot
@@ -200,18 +202,18 @@ plausible future source of malformed-return retries.
 
 ## 7. Errors and gaps in `hosts/claude-code.json`
 
-Six, ordered by how wrong they are. **These are still unfixed.**
+Six, ordered by how wrong they are. **1–3 are fixed as of 2026-09-16 (`9b3bf0a`); 4–6 remain open.**
 
-1. **`scoped_hooks: supported: true, field: "hooks"` is false for this plugin.**
+1. **FIXED — `scoped_hooks` was `supported: true, field: "hooks"`, and is false for this plugin.**
    Plugin-shipped agents ignore `hooks`. The row's own `verified` note already
    explains that we use session-wide hooks keyed on `agent_type` instead — so the
    note is right and the boolean contradicts it. The renderer reads the boolean.
    Must become `false`, with the plugin restriction as the reason.
 
-2. **`must_not: ask-owner` is host-enforced, not instructional.**
+2. **FIXED — `must_not: ask-owner` is host-enforced, not instructional.**
    `AskUserQuestion` is stripped from every subagent unconditionally.
 
-3. **`must_not: spawn-agents` is host-enforced** whenever `tools` is written
+3. **FIXED — `must_not: spawn-agents` is host-enforced** whenever `tools` is written
    without `Agent`, and additionally bounded by the depth cap. We disclose it as
    compliance-only.
 
@@ -253,7 +255,8 @@ be revisited.
 errors immediately, leaves the manifest silent about things it cannot currently
 express.
 
-Recommendation: **(b) first, then (a)**. Findings 1–3 are wrong statements being
+Recommendation: **(b) first, then (a)**. (b) was taken on 2026-09-16 in
+`9b3bf0a`; (a) is still open. Findings 1–3 are wrong statements being
 rendered into shipped agent files today; 4–6 are omissions. Fixing a false claim
 does not need to wait for a schema that can hold a richer truth. Note also that
 correcting finding 1 changes generated output — the `scoped_hooks` disclosure

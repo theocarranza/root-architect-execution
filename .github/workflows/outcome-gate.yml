@@ -38,7 +38,7 @@ jobs:
       # directory. Root bypasses permission bits, so under root they skip and
       # the suite still reports OK. That is the exact fail-open shape the
       # guards in this repo exist to close, so refuse the run instead of
-      # letting the gate pass on 120 of 125 tests.
+      # letting the gate pass while silently covering only part of the suite.
       - name: Refuse to run the suite as root
         run: |
           if [ "$(id -u)" -eq 0 ]; then

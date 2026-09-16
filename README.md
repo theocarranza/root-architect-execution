@@ -154,8 +154,8 @@ request, so the gate no longer depends on a contributor remembering it. Run
 them locally anyway — CI is the backstop, not the first line. The workflow
 refuses to run as root: the five tests that prove an unreadable dispatch state
 denies do it with `chmod 000`, root bypasses permission bits, and a suite that
-skips them still reports `OK`. A gate that passes on 120 of 125 tests without
-saying so is the fail-open this repo's guards exist to close.
+skips them still reports `OK`. A gate that silently covers only
+part of the suite is the fail-open this repo's guards exist to close.
 
 ## What the hooks enforce
 
@@ -207,6 +207,12 @@ version: write `hosts/<name>.json`, give every capability a `verified` note —
 including every `supported: false` — render, and gate. A capability the host
 cannot express becomes a disclosure in the generated file, never a silent drop.
 
-`hosts/codex.json` and `hosts/cursor.json` are carried from the reference
-project and marked inherited; the capability gate prints a warning for them
-until someone re-verifies them against those hosts' own documentation.
+`hosts/cursor.json` is carried from the reference project and marked
+inherited; the capability gate prints a warning for it until someone
+re-verifies it against that host's own documentation. `hosts/codex.json` was
+re-verified against the Codex subagent and hooks documentation and codex-cli
+0.147.0, and `hosts/claude-code.json` against the Claude Code subagent and
+plugin references — see [[Claude Code Subagent Contract]] in the vault for the
+latter, with provenance per claim. A host is flagged by the gate when its
+`source` begins `INHERITED`, so the warning and this paragraph cannot drift
+apart silently.
