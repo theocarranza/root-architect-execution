@@ -34,12 +34,14 @@ Return exactly one fenced json block in this shape, and nothing else. Placeholde
   "notes": "<text>"
 }
 
-Capability class: write-scoped. Allowed: fs.read, fs.write, shell.
+Capability class: write-scoped. Allowed: apply_patch, Bash.
 Shell purpose: Run the brief's acceptance commands to observe RED and then GREEN counts. Not for Git, not for installs, not for exploration.
 You must never: ask-owner, commit, handoff-to-peer, spawn-agents, stage, widen-scope.
 
 Not enforced by this host:
 - Tool grant is not enforced on this host: codex has no per-agent tool allowlist, so the grant stated above is an instruction only.
+- These portable tool intents have no mapping on this host and are instructions only: read-files, search-files.
 - Write scope is never host-enforced anywhere: no host limits edits to a brief's write paths. The boundary holds because the agent honours it and root reviews the diff against it.
+- Codex does not document worker identity in PreToolUse, so its root-versus-worker write separation is not hook-enforced; root must review the materialized worker diff.
 - Per-agent hooks are unavailable on this host, so the prohibitions stated above rely on session-wide hooks or on the agent's own compliance.
 """

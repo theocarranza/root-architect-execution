@@ -1,7 +1,7 @@
 {
   "host": "claude-code",
-  "verified_on": "2026-09-07",
-  "source": "https://code.claude.com/docs/en/sub-agents (frontmatter field reference) plus `claude --help` and the agent spawn option keys {schema, model, effort, isolation, agentType, disallowedTools, bashCommandClamp} read from the 2.1.234 binary.",
+  "verified_on": "2026-09-14",
+  "source": "https://code.claude.com/docs/en/sub-agents (frontmatter table, resolution order, limitations) and https://code.claude.com/docs/en/plugins-reference (the plugin-shipped agent restriction and its supported-field list), cross-checked against strings in the installed 2.1.269 binary. Full contract with per-claim provenance: AI_Codex/Knowledge/Claude Code Subagent Contract.md.",
   "agent_dir": "agents",
   "bundled_dir": "agents",
   "root_placeholder": "${CLAUDE_PLUGIN_ROOT}",
@@ -70,9 +70,14 @@
       "verified": "Enforced by the host, not by instruction: an agent whose `tools` omits Edit, Write and NotebookEdit has no write tool to call. The paired `disallowedTools` entry is belt-and-braces against a later inherited grant."
     },
     "scoped_hooks": {
-      "supported": true,
-      "field": "hooks",
-      "verified": "Documented frontmatter field carrying a hook configuration scoped to that subagent. This plugin instead uses session-wide hooks keyed on the agent_type field that PreToolUse payloads carry inside subagents, so one hook file covers agents this plugin did not generate."
+      "supported": false,
+      "field": null,
+      "verified": "plugins-reference states that hooks, mcpServers and permissionMode are NOT supported for plugin-shipped agents, and this plugin ships as a plugin \u2014 so the frontmatter field exists for hand-written agents but is ignored for every agent we distribute. Recorded as true until 2026-09-14 on the strength of the field existing; that was a claim about the host rather than about our distribution channel. This plugin uses session-wide hooks keyed on the agent_type that PreToolUse carries, which is why the prohibitions still hold."
+    }
+  },
+  "enforced_prohibitions": {
+    "ask-owner": {
+      "verified": "AskUserQuestion is in the documented set of tools removed from every subagent unconditionally (sub-agents, 'Tools always removed'), alongside EnterPlanMode, EndConversation and others. No tool grant can reinstate it, so the prohibition cannot be violated here."
     }
   }
 }

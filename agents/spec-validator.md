@@ -53,4 +53,11 @@ You must never: ask-owner, commit, edit-files, handoff-to-peer, run-commands, sp
 
 ## Enforcement
 
-Every declared capability is enforced by the host itself.
+What this host does *not* enforce for you:
+
+- Per-agent hooks are unavailable on this host, so the prohibitions stated above rely on session-wide hooks or on the agent's own compliance.
+
+What this host **does** enforce, so it is not left to your compliance:
+
+- **ask-owner** — AskUserQuestion is in the documented set of tools removed from every subagent unconditionally (sub-agents, 'Tools always removed'), alongside EnterPlanMode, EndConversation and others. No tool grant can reinstate it, so the prohibition cannot be violated here.
+- **spawn-agents** — Agent is absent from the `tools` grant this agent is written with, and this host enforces that grant, so the tool needed to spawn cannot be called.

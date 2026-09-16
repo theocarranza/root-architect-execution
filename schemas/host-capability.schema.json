@@ -50,6 +50,11 @@
         "items": { "type": "string" }
       }
     },
+    "enforced_prohibitions": {
+      "type": "object",
+      "description": "Portable must_not ids this host makes structurally impossible, whatever a role declares - a tool the host strips from every agent, for example. Optional; absent means nothing beyond what the capabilities already imply. Prohibitions the renderer can DERIVE from tool_map plus the role's own grant are deliberately not listed here: a derived claim changes when the grant changes, a declared one can drift away from the truth.",
+      "additionalProperties": { "$ref": "#/$defs/enforced_prohibition" }
+    },
     "model_map": {
       "type": "object",
       "required": ["cheap", "mid", "strong"],
@@ -101,6 +106,18 @@
           "type": "string",
           "minLength": 1,
           "description": "How this was checked. For an unsupported capability this is the evidence of absence, not an assumption."
+        }
+      }
+    },
+    "enforced_prohibition": {
+      "type": "object",
+      "required": ["verified"],
+      "additionalProperties": false,
+      "properties": {
+        "verified": {
+          "type": "string",
+          "minLength": 1,
+          "description": "How this was checked. A prohibition belongs here only where the host makes it impossible to violate independently of the role's tool grant, so that the generated file can state enforcement rather than understate it."
         }
       }
     }

@@ -30,11 +30,12 @@ Return exactly one fenced json block in this shape, and nothing else. Placeholde
   ]
 }
 
-Capability class: read-only. Allowed: fs.read.
-Denied: fs.write, shell.
+Capability class: read-only. Allowed: no host-enforced tools.
+Denied: apply_patch, Bash.
 You must never: ask-owner, commit, edit-files, handoff-to-peer, run-commands, spawn-agents, stage, widen-scope.
 
 Not enforced by this host:
 - Tool grant is not enforced on this host: codex has no per-agent tool allowlist, so the grant stated above is an instruction only.
+- These portable tool intents have no mapping on this host and are instructions only: read-files, search-files.
 - Per-agent hooks are unavailable on this host, so the prohibitions stated above rely on session-wide hooks or on the agent's own compliance.
 """

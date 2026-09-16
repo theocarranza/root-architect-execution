@@ -63,3 +63,9 @@ You must never: ask-owner, commit, handoff-to-peer, spawn-agents, stage, widen-s
 What this host does *not* enforce for you:
 
 - Write scope is **never** host-enforced anywhere: no host limits edits to a brief's write paths. The boundary holds because the agent honours it and root reviews the diff against it.
+- Per-agent hooks are unavailable on this host, so the prohibitions stated above rely on session-wide hooks or on the agent's own compliance.
+
+What this host **does** enforce, so it is not left to your compliance:
+
+- **ask-owner** — AskUserQuestion is in the documented set of tools removed from every subagent unconditionally (sub-agents, 'Tools always removed'), alongside EnterPlanMode, EndConversation and others. No tool grant can reinstate it, so the prohibition cannot be violated here.
+- **spawn-agents** — Agent is absent from the `tools` grant this agent is written with, and this host enforces that grant, so the tool needed to spawn cannot be called.

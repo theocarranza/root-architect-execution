@@ -17,6 +17,7 @@ instruction is all there is.
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -77,6 +78,45 @@ def load_host(name):
     return host
 
 
+def format_allow_list(allow):
+    """The grant, in prose, naming the empty case rather than rendering blank.
+
+    `", ".join([])` is the empty string, which reads as `Allowed: .` — text a
+    model cannot act on. An empty mapped allow list is a real state on a host
+    that enforces no allowlist, so it gets words instead of a blank.
+
+    This is prose only. An empty allowlist *field* is not a rendering problem
+    to word around; see render_markdown_yaml.
+    """
+    return ", ".join(allow) if allow else "no host-enforced tools"
+
+
+def toml_multiline(text):
+    '''Escape a value for the body of a TOML multi-line basic string.
+
+    `developer_instructions` is emitted inside """...""", which processes
+    backslash escapes and terminates at the first """. The plugin root lands
+    in that body and is supplied by whoever runs the installer, so unescaped
+    input does not merely look wrong: a path containing a backslash is
+    silently rewritten (\\t parses as a tab, and the agent then cannot find
+    its role prose), and one containing """ closes the string early and turns
+    the remaining instructions into TOML statements.
+
+    Only what actually breaks the delimiter is escaped — backslashes, and
+    runs of three or more quotes. A lone or doubled quote is legal inside
+    """ and is left alone, so the JSON return skeleton stays readable and
+    today's generated files keep their exact bytes. Backslashes are escaped
+    first so the quote escapes are not escaped again.
+    '''
+    text = text.replace("\\", "\\\\")
+    return re.sub(r'"{3,}', lambda m: '\\"' * len(m.group()), text)
+
+
+def toml_basic(text):
+    """Escape a value for a single-line TOML basic string."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def resolve_tools(role, host):
     """Map portable intents to host tool names, collecting what cannot map."""
     tool_map = host["tool_map"]
@@ -94,6 +134,44 @@ def resolve_tools(role, host):
             if name not in deny and name not in allow:
                 deny.append(name)
     return allow, deny, unmappable
+
+
+def enforced_prohibitions(role, host):
+    """Which of this role's must_not items the host makes impossible, not merely
+    forbidden.
+
+    Two sources, deliberately kept apart. A prohibition the renderer can DERIVE
+    from tool_map plus the role's own grant cannot drift: change the grant and
+    the claim changes with it. One the host must DECLARE can drift, so it costs
+    a `verified` note in the manifest and is only used where derivation is
+    impossible -- `ask-owner` maps to no portable intent at all, so nothing in
+    tool_map could ever imply it.
+
+    Understating enforcement is its own failure in a file whose purpose is to
+    state enforcement accurately, which is why this exists alongside
+    disclosures() rather than inside it.
+    """
+    caps = host["capabilities"]
+    forbidden = set(role["must_not"])
+    found = {}
+
+    for name, entry in (host.get("enforced_prohibitions") or {}).items():
+        if name in forbidden:
+            found[name] = entry["verified"]
+
+    # Derived: spawning is host-blocked when the allowlist is enforced and the
+    # delegate intent never reaches the written grant.
+    if "spawn-agents" in forbidden and caps["tool_allowlist"]["supported"]:
+        delegate = host["tool_map"].get("delegate") or []
+        allow, _deny, _unmappable = resolve_tools(role, host)
+        if delegate and not any(name in allow for name in delegate):
+            found.setdefault(
+                "spawn-agents",
+                "%s is absent from the `%s` grant this agent is written with, "
+                "and this host enforces that grant, so the tool needed to spawn "
+                "cannot be called." % (
+                    ", ".join(delegate), caps["tool_allowlist"]["field"]))
+    return found
 
 
 def disclosures(role, host, unmappable):
@@ -118,6 +196,11 @@ def disclosures(role, host, unmappable):
             "Write scope is **never** host-enforced anywhere: no host limits "
             "edits to a brief's write paths. The boundary holds because the "
             "agent honours it and root reviews the diff against it.")
+        if host["host"] == "codex":
+            out.append(
+                "Codex does not document worker identity in PreToolUse, so its "
+                "root-versus-worker write separation is not hook-enforced; "
+                "root must review the materialized worker diff.")
     if not caps["reasoning_effort"]["supported"]:
         out.append(
             "Reasoning strength is not settable on this host. Record effort as "
@@ -162,7 +245,29 @@ def render_markdown_yaml(role, host, role_file):
             lines.append("%s: %s" % (caps["reasoning_effort"]["field"], effort))
 
     if caps["tool_allowlist"]["supported"]:
-        lines.append("%s: %s" % (caps["tool_allowlist"]["field"], ", ".join(allow)))
+        if not allow:
+            # Neither available option is safe, so neither is taken. Emitting
+            # the field empty is a malformed grant; omitting it is worse,
+            # because every host that has an allowlist treats the absent field
+            # as "inherit everything" — hosts/claude-code.json records exactly
+            # that for `tools`, and read_only_enforced points at the same
+            # field, so an omitted line also drops read-only enforcement. An
+            # empty grant would silently render as a full one.
+            #
+            # schemas/agent-role.schema.json already names the right answer:
+            # an intent a host cannot express "is a rendering error, not a
+            # silent drop". So it is raised here rather than worded around.
+            raise SystemExit(
+                "hosts/%s.json enforces a tool allowlist (%s), but role %r "
+                "maps to no host tool%s.\nOmitting the field would grant every "
+                "tool on this host and emitting it empty is malformed, so this "
+                "is a rendering error: map the intent in tool_map, or declare "
+                "capabilities.tool_allowlist.supported = false."
+                % (host["host"], caps["tool_allowlist"]["field"], role["id"],
+                   " (unmappable: %s)" % ", ".join(sorted(unmappable))
+                   if unmappable else ""))
+        lines.append("%s: %s" % (caps["tool_allowlist"]["field"],
+                                 ", ".join(allow)))
     if caps["tool_denylist"]["supported"] and deny:
         lines.append("%s: %s" % (caps["tool_denylist"]["field"], ", ".join(deny)))
     if (role["mutation"] == "read-only"
@@ -189,7 +294,7 @@ def render_markdown_yaml(role, host, role_file):
 
     lines += ["## Grant", "",
               "Capability class: **%s**." % role["mutation"], ""]
-    lines.append("Allowed: %s." % ", ".join(allow))
+    lines.append("Allowed: %s." % format_allow_list(allow))
     if deny:
         lines.append("Denied: %s." % ", ".join(deny))
     if role["tools"].get("shell_purpose"):
@@ -199,14 +304,23 @@ def render_markdown_yaml(role, host, role_file):
               "You must never: %s." % ", ".join(sorted(role["must_not"])), ""]
 
     notes = disclosures(role, host, unmappable)
+    enforced = enforced_prohibitions(role, host)
     lines += ["## Enforcement", ""]
     if notes:
         lines.append("What this host does *not* enforce for you:")
         lines.append("")
         lines += ["- %s" % note for note in notes]
-    else:
+        lines.append("")
+    elif not enforced:
         lines.append("Every declared capability is enforced by the host itself.")
-    lines.append("")
+        lines.append("")
+    if enforced:
+        lines.append("What this host **does** enforce, so it is not left to your "
+                     "compliance:")
+        lines.append("")
+        lines += ["- **%s** — %s" % (name, why)
+                  for name, why in sorted(enforced.items())]
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -225,7 +339,8 @@ def render_toml(role, host, role_file):
         "",
         return_skeleton(role),
         "",
-        "Capability class: %s. Allowed: %s." % (role["mutation"], ", ".join(allow)),
+        "Capability class: %s. Allowed: %s."
+        % (role["mutation"], format_allow_list(allow)),
     ]
     if deny:
         body.append("Denied: %s." % ", ".join(deny))
@@ -236,19 +351,28 @@ def render_toml(role, host, role_file):
         body.append("")
         body.append("Not enforced by this host:")
         body += ["- %s" % note.replace("**", "") for note in notes]
+    enforced = enforced_prohibitions(role, host)
+    if enforced:
+        body.append("")
+        body.append("Enforced by this host, not left to your compliance:")
+        body += ["- %s: %s" % (name, why.replace("**", ""))
+                 for name, why in sorted(enforced.items())]
 
     lines = ["# %s" % BANNER.format(role_file=role_file, host=host["host"]),
-             'name = "%s"' % role["id"],
-             'description = "%s"' % role["description"].replace('"', "'"),
+             'name = "%s"' % toml_basic(role["id"]),
+             'description = "%s"' % toml_basic(role["description"].replace('"', "'")),
              '%s = "%s"' % (caps["explicit_model"]["field"],
-                            host["model_map"][role["model"]["default"]])]
+                            toml_basic(host["model_map"][role["model"]["default"]]))]
     if caps["reasoning_effort"]["supported"]:
         lines.append('%s = "%s"' % (caps["reasoning_effort"]["field"],
-                                    host["effort_map"][role["reasoning"]["default"]]))
+                                    toml_basic(host["effort_map"][role["reasoning"]["default"]])))
     if role["mutation"] == "read-only" and caps["read_only_enforced"]["supported"]:
         lines.append('%s = "read-only"' % caps["read_only_enforced"]["field"])
     lines.append('developer_instructions = """')
-    lines += body
+    # Everything above is generated from repo-controlled manifests. `body`
+    # is not: it carries the plugin root the installer was given, so it is
+    # the one part that has to survive an arbitrary filesystem path.
+    lines += [toml_multiline(line) for line in body]
     lines.append('"""')
     return "\n".join(lines) + "\n"
 
@@ -259,12 +383,18 @@ def main(argv=None):
     parser.add_argument("--out", default=None,
                         help="output directory; defaults to the host manifest's "
                              "agent_dir, resolved inside the plugin")
+    parser.add_argument("--root-placeholder", default=None,
+                        help="path used when generated instructions refer to the "
+                             "plugin root (installers should pass an absolute path)")
     parser.add_argument("--check", action="store_true",
                         help="regenerate in memory and fail if what is on disk "
                              "differs, instead of writing")
     args = parser.parse_args(argv)
 
     host = load_host(args.host)
+    if args.root_placeholder is not None:
+        host = dict(host)
+        host["root_placeholder"] = args.root_placeholder
     out_dir = Path(args.out) if args.out else ROOT / host["bundled_dir"]
     extension = ".toml" if host["format"] == "toml" else ".md"
     render = render_toml if host["format"] == "toml" else render_markdown_yaml

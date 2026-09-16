@@ -31,7 +31,16 @@ _TYPES = {
 
 
 class SchemaError(Exception):
-    """Raised for a schema this validator cannot honour, never for bad data."""
+    """Raised for a schema this validator cannot honour, never for bad data.
+
+    `path`, when set, names the specific schema file responsible (for example
+    a sibling $ref target), so a caller building its own error path/message
+    can name that file instead of whatever root schema it started with.
+    """
+
+    def __init__(self, message, path=None):
+        super().__init__(message)
+        self.path = path
 
 
 def _is_type(value, name):
@@ -66,7 +75,18 @@ class Validator:
             raise SchemaError("unsupported ref: %s" % ref)
         if ref not in self._siblings:
             target = self.schema_path.parent / ref
-            self._siblings[ref] = json.loads(target.read_text(encoding="utf-8"))
+            try:
+                text = target.read_text(encoding="utf-8")
+            except OSError as e:
+                raise SchemaError(
+                    "sibling schema file not found: %s: %s" % (target, e),
+                    path=target)
+            try:
+                self._siblings[ref] = json.loads(text)
+            except ValueError as e:
+                raise SchemaError(
+                    "sibling schema file %s is not valid JSON: %s" % (target, e),
+                    path=target)
         sibling = self._siblings[ref]
         return sibling, sibling
 

@@ -68,14 +68,34 @@ Open a session ledger. Run the plan-named baseline commands, checkpoint, make
 one bootstrap commit, and file the first owner report from
 [references/contracts.md](references/contracts.md).
 
-Then run the capability gate before dispatching anything:
+Then run the capability gate before dispatching anything. Select the host
+explicitly; Codex must not run the Claude gate:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_roles.py"
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" --host claude-code --check
+if [ "${RAE_HOST:-claude-code}" = "codex" ]; then
+  python3 "$PLUGIN_ROOT/scripts/validate_roles.py" --host codex
+  python3 "$PLUGIN_ROOT/scripts/render_agents.py" --host codex --check
+else
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_roles.py"
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" --host claude-code --check
+fi
 ```
 
 ## Gates
+
+On Codex, set `RAE_HOST=codex` and `PLUGIN_ROOT` to the installed plugin root.
+Codex plugin installation copies the bundle but does not provide a
+documented post-install callback for custom agents, so activate them explicitly:
+
+```bash
+python3 "$PLUGIN_ROOT/scripts/validate_roles.py" --host codex
+python3 "$PLUGIN_ROOT/scripts/install_codex.py" --target .codex/agents --plugin-root "$PLUGIN_ROOT"
+```
+
+The bootstrap is idempotent and keeps generated agents out of the source tree.
+Codex cannot hook-enforce root-versus-worker write separation because its
+PreToolUse payload does not document worker identity; that boundary is
+instructional and review-based. Claude retains its identity-aware write guard.
 
 Each gate is a hard stop, in order. Nothing advances past a gate that has not
 been observed to pass.
@@ -96,7 +116,12 @@ been observed to pass.
    Findings from either go back to the same implementer.
 7. **Checkpoint gate.** Ledger updated, brief-owned paths staged,
    `git diff --cached --check` clean, one narrow commit.
-8. **Outcome gate.** The full recorded baseline, not targeted evidence.
+8. **Outcome gate.** The full recorded baseline, not targeted evidence — and
+   whatever else validates the *kind* of artifact the work touched. A test suite
+   only checks what it was written to check: a change to a manifest, a schema, a
+   lockfile, or generated output can leave every test green and still ship
+   broken. Name that validator in the acceptance commands rather than
+   discovering the gap afterwards.
 
 ## State
 
@@ -108,7 +133,13 @@ marker file, and both guard hooks re-read it on every call.
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" open  --brief /tmp/brief.json --run-id 20260907-task-3
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" active
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" close --run-id 20260907-task-3 --outcome accepted
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" verify
 ```
+
+`verify` reports every record in the state directory, including archived ones,
+and exits non-zero if any is corrupt. It is the command the guards' deny
+messages name, because a record they refuse to trust is one they will not act
+on until it is repaired or removed.
 
 Hand-offs carry resolved inputs, decisions, artifact paths, and hashes — not
 accumulated transcripts.
@@ -173,7 +204,11 @@ applied is a false claim about the run.
 ## Stop conditions
 
 - Block rather than fall back when a named role or its isolation is
-  unavailable.
+  unavailable. The same rule governs the dispatch state itself: a record that
+  cannot be read, parsed, or validated blocks root's writes rather than reading
+  as "no delegation open". Run `dispatch_state.py verify` to see which file is
+  at fault, then repair or remove it — the guards match write tools only, so
+  `Bash` stays available to recover with.
 - Stop on a malformed worker return after one corrective retry.
 - Never allow worker-to-worker handoff, a broadened tool grant, or unbounded
   retries.

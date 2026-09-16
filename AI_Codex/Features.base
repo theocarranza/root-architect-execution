@@ -1,0 +1,13 @@
+filters:
+  and:
+    - file.inFolder("Features")
+    - file.ext == "md"
+properties:
+  type:
+    displayName: Type
+  area:
+    displayName: Area
+views:
+  - type: table
+    name: All features
+    order: [file.name, type, area, stack, ticket, created]

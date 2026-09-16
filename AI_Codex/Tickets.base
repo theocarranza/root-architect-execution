@@ -1,0 +1,36 @@
+filters:
+  and:
+    - file.inFolder("Tickets")
+    - file.ext == "md"
+properties:
+  type:
+    displayName: Type
+  area:
+    displayName: Area
+  ticket:
+    displayName: Ticket
+views:
+  - type: table
+    name: Active
+    filters:
+      and:
+        - file.inFolder("Tickets/Active")
+    order: [file.name, type, area, ticket, created]
+  - type: table
+    name: Ready
+    filters:
+      and:
+        - file.inFolder("Tickets/Ready")
+    order: [file.name, type, area, ticket, created]
+  - type: table
+    name: Closed
+    filters:
+      and:
+        - file.inFolder("Tickets/Closed")
+    order: [file.name, type, area, ticket, created]
+  - type: table
+    name: Resolved
+    filters:
+      and:
+        - file.inFolder("Tickets/Resolved")
+    order: [file.name, type, area, ticket, created]
