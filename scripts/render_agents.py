@@ -136,6 +136,44 @@ def resolve_tools(role, host):
     return allow, deny, unmappable
 
 
+def enforced_prohibitions(role, host):
+    """Which of this role's must_not items the host makes impossible, not merely
+    forbidden.
+
+    Two sources, deliberately kept apart. A prohibition the renderer can DERIVE
+    from tool_map plus the role's own grant cannot drift: change the grant and
+    the claim changes with it. One the host must DECLARE can drift, so it costs
+    a `verified` note in the manifest and is only used where derivation is
+    impossible -- `ask-owner` maps to no portable intent at all, so nothing in
+    tool_map could ever imply it.
+
+    Understating enforcement is its own failure in a file whose purpose is to
+    state enforcement accurately, which is why this exists alongside
+    disclosures() rather than inside it.
+    """
+    caps = host["capabilities"]
+    forbidden = set(role["must_not"])
+    found = {}
+
+    for name, entry in (host.get("enforced_prohibitions") or {}).items():
+        if name in forbidden:
+            found[name] = entry["verified"]
+
+    # Derived: spawning is host-blocked when the allowlist is enforced and the
+    # delegate intent never reaches the written grant.
+    if "spawn-agents" in forbidden and caps["tool_allowlist"]["supported"]:
+        delegate = host["tool_map"].get("delegate") or []
+        allow, _deny, _unmappable = resolve_tools(role, host)
+        if delegate and not any(name in allow for name in delegate):
+            found.setdefault(
+                "spawn-agents",
+                "%s is absent from the `%s` grant this agent is written with, "
+                "and this host enforces that grant, so the tool needed to spawn "
+                "cannot be called." % (
+                    ", ".join(delegate), caps["tool_allowlist"]["field"]))
+    return found
+
+
 def disclosures(role, host, unmappable):
     """Every guarantee this host will not enforce, stated plainly."""
     caps = host["capabilities"]
@@ -266,14 +304,23 @@ def render_markdown_yaml(role, host, role_file):
               "You must never: %s." % ", ".join(sorted(role["must_not"])), ""]
 
     notes = disclosures(role, host, unmappable)
+    enforced = enforced_prohibitions(role, host)
     lines += ["## Enforcement", ""]
     if notes:
         lines.append("What this host does *not* enforce for you:")
         lines.append("")
         lines += ["- %s" % note for note in notes]
-    else:
+        lines.append("")
+    elif not enforced:
         lines.append("Every declared capability is enforced by the host itself.")
-    lines.append("")
+        lines.append("")
+    if enforced:
+        lines.append("What this host **does** enforce, so it is not left to your "
+                     "compliance:")
+        lines.append("")
+        lines += ["- **%s** — %s" % (name, why)
+                  for name, why in sorted(enforced.items())]
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -304,6 +351,12 @@ def render_toml(role, host, role_file):
         body.append("")
         body.append("Not enforced by this host:")
         body += ["- %s" % note.replace("**", "") for note in notes]
+    enforced = enforced_prohibitions(role, host)
+    if enforced:
+        body.append("")
+        body.append("Enforced by this host, not left to your compliance:")
+        body += ["- %s: %s" % (name, why.replace("**", ""))
+                 for name, why in sorted(enforced.items())]
 
     lines = ["# %s" % BANNER.format(role_file=role_file, host=host["host"]),
              'name = "%s"' % toml_basic(role["id"]),

@@ -495,6 +495,102 @@ class RenderTests(unittest.TestCase):
                               "the path must survive TOML unescaping intact")
 
 
+    # --- host-enforced prohibitions (the ledger's section 7, findings 1-3) ---
+
+    def test_scoped_hooks_is_false_because_we_ship_as_a_plugin(self):
+        """plugins-reference: hooks are ignored for plugin-shipped agents.
+
+        The manifest claimed `supported: true` while its own verified note
+        explained that session-wide hooks are used instead. The renderer reads
+        the boolean, so the generated file asserted an enforcement that does
+        not exist for anything distributed the way this plugin is.
+        """
+        host = render_agents.load_host("claude-code")
+        hooks = host["capabilities"]["scoped_hooks"]
+        self.assertFalse(hooks["supported"])
+        self.assertIsNone(hooks["field"])
+        self.assertIn("plugin", hooks["verified"].lower())
+
+    def test_ask_owner_is_reported_as_host_enforced(self):
+        """AskUserQuestion is stripped from every subagent unconditionally.
+
+        Not derivable: `ask-owner` maps to no portable tool intent, so nothing
+        in tool_map could imply it. It is declared in the manifest instead, and
+        the declaration has to carry its own provenance.
+        """
+        host = render_agents.load_host("claude-code")
+        for _role_file, role in render_agents.load_roles():
+            with self.subTest(role=role["id"]):
+                found = render_agents.enforced_prohibitions(role, host)
+                self.assertIn("ask-owner", found)
+                self.assertTrue(found["ask-owner"].strip())
+
+    def test_spawn_agents_enforcement_is_derived_not_declared(self):
+        """Derived from the grant, so it cannot drift away from the truth.
+
+        Every role denies `delegate`, and this host enforces its allowlist, so
+        Agent never reaches the written `tools` line. Grant delegate back and
+        the claim must disappear on its own -- that is the whole reason this
+        one is computed rather than listed in the manifest.
+        """
+        host = render_agents.load_host("claude-code")
+        _role_file, role = render_agents.load_roles()[0]
+        self.assertIn("spawn-agents", render_agents.enforced_prohibitions(role, host))
+
+        granted = json.loads(json.dumps(role))
+        granted["tools"]["allow"] = list(granted["tools"]["allow"]) + ["delegate"]
+        granted["tools"]["deny"] = [d for d in granted["tools"]["deny"]
+                                    if d != "delegate"]
+        self.assertNotIn("spawn-agents",
+                         render_agents.enforced_prohibitions(granted, host))
+
+    def test_a_host_without_an_enforced_allowlist_claims_nothing(self):
+        """Codex and Cursor must not inherit Claude's enforcement claims."""
+        for name in ("codex", "cursor"):
+            host = render_agents.load_host(name)
+            for _role_file, role in render_agents.load_roles():
+                with self.subTest(host=name, role=role["id"]):
+                    self.assertEqual(
+                        render_agents.enforced_prohibitions(role, host), {})
+
+    def test_enforced_prohibitions_are_not_listed_as_unenforced(self):
+        """The two lists must never merge.
+
+        A positive enforcement statement rendered under the "does not enforce"
+        heading is precisely the kind of false claim this file exists to catch,
+        and it is what the first draft of this change actually produced.
+        """
+        host = render_agents.load_host("claude-code")
+        for role_file, role in render_agents.load_roles():
+            with self.subTest(role=role["id"]):
+                notes = render_agents.disclosures(
+                    role, host, render_agents.resolve_tools(role, host)[2])
+                joined = " ".join(notes)
+                # Not a blanket search for "host-enforced": the write-scope
+                # note legitimately uses the phrase negatively ("never
+                # host-enforced anywhere"). What must never appear among the
+                # disclosures is a prohibition this host actually enforces.
+                for name in render_agents.enforced_prohibitions(role, host):
+                    self.assertNotIn(name, joined)
+
+                text = render_agents.render_markdown_yaml(role, host, role_file)
+                body = text.split("## Enforcement", 1)[1]
+                negative, _, positive = body.partition(
+                    "What this host **does** enforce")
+                self.assertIn("ask-owner", positive)
+                self.assertIn("spawn-agents", positive)
+                self.assertNotIn("ask-owner", negative)
+                self.assertNotIn("spawn-agents", negative)
+
+    def test_generated_agents_state_the_enforcement_on_disk(self):
+        """Guards the committed artifacts, not the code path above."""
+        for name in ("impl-executor", "spec-validator", "quality-validator"):
+            with self.subTest(agent=name):
+                text = (ROOT / "agents" / (name + ".md")).read_text(encoding="utf-8")
+                self.assertIn("What this host **does** enforce", text)
+                self.assertIn("**ask-owner**", text)
+                self.assertIn("**spawn-agents**", text)
+
 class CheckReturnTests(unittest.TestCase):
 
     def check(self, role, payload, extra=None, raw=None):
