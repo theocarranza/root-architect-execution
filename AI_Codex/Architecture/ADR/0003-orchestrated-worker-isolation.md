@@ -192,10 +192,12 @@ different risk from one that degrades quietly.
 
 What it does not fix: the variable's default remains a remotely-controlled
 feature value. An environment where the operator cannot set variables at all
-has no path under D12, and the fallback there is the dispatch-script route,
-which the envelope protocol is deliberately independent of — the mailbox
-format, D5, D6 and D9 hold whichever way workers are launched, so that
-migration would rewrite dispatch and leave the protocol intact.
+has no path under D12. The fallback there is specified in
+[[Script Dispatch]] — the envelope protocol is deliberately independent of how
+a worker is launched, so D5, D6 and D9 hold either way and that migration
+rewrites dispatch while leaving the protocol intact. It carries one unmeasured
+risk of its own: a worker launched as its own process may not report the
+`agent_type` this repository's write guard keys on.
 
 **A remotely-defaulted cap cannot be declared once.** Because the default is a
 feature value rather than a release constant, an interface file recording
