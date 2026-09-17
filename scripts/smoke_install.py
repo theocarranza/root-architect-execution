@@ -46,7 +46,7 @@ class SmokeError(Exception):
     """The bundle built, and the host would not load it."""
 
 
-def expectations():
+def expectations(host):
     """What the host must report back, derived from the sources.
 
     Derived rather than listed so the gate cannot quietly stop covering a role
@@ -55,16 +55,20 @@ def expectations():
     roles = sorted(p.stem for p in (ROOT / "roles").glob("*.json"))
     if not roles:
         raise SmokeError("no roles found; nothing to expect")
-    manifest = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+    adapter = ROOT / "adapters" / host
+    manifest = json.loads(
+        (adapter / "manifest.template.json").read_text(encoding="utf-8"))
     # hooks.json nests the events under a "hooks" key. Reading the top level
     # yielded the literal string "hooks", which then matched the report's own
     # "Hooks (1)" heading -- an assertion that passed no matter what shipped.
     # That is the vacuous-coverage failure this repository has rejected before,
     # so the event names are read from where they actually live.
-    document = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))
+    document = json.loads(
+        (adapter / "hooks/hooks.json").read_text(encoding="utf-8"))
     events = sorted(document.get("hooks", {}))
     if not events:
-        raise SmokeError("hooks/hooks.json declares no events to look for")
+        raise SmokeError("adapters/%s/hooks/hooks.json declares no events to "
+                         "look for" % host)
     return {
         "plugin": manifest["name"],
         "version": manifest["version"],
@@ -139,7 +143,7 @@ def smoke(host, bundle=None):
     if shutil.which("claude") is None:
         return None  # caller decides whether an absent CLI is fatal
 
-    want = expectations()
+    want = expectations(host)
 
     unreachable = hook_targets(bundle)
     if unreachable:

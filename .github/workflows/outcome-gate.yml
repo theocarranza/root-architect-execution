@@ -91,11 +91,16 @@ jobs:
       - name: Install the Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      # The suite does not read .claude-plugin/, so a manifest that disagrees
-      # with itself passes it cleanly. A version bump once moved plugin.json
-      # and left the marketplace entry behind, and only this caught it.
+      # The BUNDLE, not the repository root. Since ADR 0001 step 3 the two
+      # manifests live in adapters/claude-code/ and the root is no longer a
+      # plugin - and `claude plugin validate .` does not fail there, it
+      # silently switches to validating components and still exits 0. A gate
+      # that keeps passing while no longer doing its job is worse than one
+      # that breaks, so the target moved with the files.
       - name: Validate the plugin manifest
-        run: claude plugin validate .
+        run: |
+          claude plugin validate dist/claude-code \
+            | tee /dev/stderr | grep -q "Validating marketplace manifest"
 
       # The only gate that runs the host against the artifact. --require-cli so
       # a runner without the CLI fails here rather than skipping quietly, which

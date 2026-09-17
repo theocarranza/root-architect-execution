@@ -78,13 +78,33 @@ version directory is not there, the update did not land.
 
 `claude plugin marketplace add <path>` on a directory source points at the
 working tree rather than caching a copy of it, so a clone can serve as its own
-marketplace while you work on it. Two things still bite:
+marketplace while you work on it. **Point it at `dist/claude-code`, not the
+repository root** — since ADR 0001 step 3 the hooks and both manifests live in
+`adapters/claude-code/`, and the root is no longer a plugin.
+
+```bash
+python3 scripts/build_adapter.py --host claude-code
+claude plugin marketplace add ./dist/claude-code
+```
+
+So the loop gains a build: edit → build → restart. That is the cost ADR 0001
+names — the thing reviewed stops being the thing that runs — and it is paid
+down by `build_adapter.py --check`, which rebuilds into a temporary directory
+and compares byte for byte, so a stale bundle fails the gate rather than
+shipping.
+
+Three things still bite:
 
 - Hooks are read at session start, so hook changes need a restart regardless.
-- `.claude-plugin/plugin.json` and the entry in `.claude-plugin/marketplace.json`
-  each carry a version and they must agree. `plugin.json` wins at install time
-  and the marketplace entry is silently ignored, so drift is invisible until
-  something installs the wrong thing. `claude plugin validate .` catches it.
+- Forgetting the rebuild is the new way to confuse yourself. The symptom is a
+  session behaving like the last build; `--check` is the answer.
+- `manifest.template.json` and the entry in `marketplace.template.json` each
+  carry a version and they must agree. `plugin.json` wins at install time and
+  the marketplace entry is silently ignored, so drift is invisible until
+  something installs the wrong thing. `claude plugin validate dist/claude-code`
+  catches it — and note the target: at the repository root the same command
+  does not fail, it quietly switches to validating components and exits 0
+  regardless. The suite asserts the agreement directly for that reason.
 
 ## Install prerequisite: the nesting cap
 
@@ -154,12 +174,11 @@ has actually gone missing.
 | `hosts/*.json` | What each host can actually express, with the date and evidence behind every claim |
 | `agents/*.md` | **Generated.** The Claude Code agent files |
 | `dist/<host>/` | **Generated.** `claude-code/` is a built, byte-gated bundle; `codex/` and `cursor/` are still reference agent copies |
-| `adapters/<host>/` | How one host's bundle is assembled — `layout.json` today, host mechanics as ADR 0001 proceeds |
 | `references/agents/*.md` | The role prose, written once and pointed at, never copied |
 | `references/contracts.md` | The four shapes the loop passes around |
 | `schemas/*.json` | Real JSON Schemas for roles, hosts, briefs, reports, verdicts, dispatch state |
-| `scripts/` | Capability gate, interface gate, renderer, return gate, dispatch state, mailbox, job queue, startup check |
-| `hooks/` | The two guards |
+| `adapters/<host>/` | That host's **mechanics**: hooks, manifest templates, the interface file, and where each piece lands in the bundle. Never role content |
+| `scripts/` | Capability gate, interface gate, renderer, builder, return gate, dispatch state, mailbox, job queue, startup check |
 | `tests/` | `python3 -m unittest discover -s tests -t .` |
 
 ## The commands root runs
@@ -191,14 +210,15 @@ python3 scripts/build_adapter.py --host claude-code --check
 python3 scripts/validate_interfaces.py
 python3 scripts/validate_roles.py
 python3 scripts/smoke_install.py --host claude-code
-claude plugin validate .
+claude plugin validate dist/claude-code
 python3.11 -m unittest discover -s tests -t .   # any 3.11+, for tomllib
 ```
 
 Each of the ones after the suite exists because the suite alone has been green
 over a real defect:
 
-- The tests do not read `.claude-plugin/`, so a manifest that disagrees with
+- The tests read the manifests but not the host's own schema for them, so a
+  manifest that disagrees with
   itself passes them cleanly. A version bump moved `plugin.json` and left the
   marketplace entry behind, and only `claude plugin validate` noticed.
 - `--check` is per host. A `hosts/codex.json` change leaves `agents/` in sync

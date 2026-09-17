@@ -34,7 +34,24 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent / "scripts"))
+
+# Two named positions, in order, and deliberately not a search.
+#
+#   <plugin root>/hooks/          -> <plugin root>/scripts/      (installed)
+#   adapters/<host>/hooks/        -> <repo root>/scripts/        (in the repo)
+#
+# The first is where this file actually runs. The second exists because ADR
+# 0001 step 3 moved the hooks into the adapter that ships them, and the guard
+# is still run in place here - by its own tests, and by anyone reproducing a
+# denial. Walking upward for the first `scripts/` found would also work and is
+# worse: this guard fails CLOSED on an import error, so a directory that
+# happens to be named scripts/ would not produce a clean failure, it would
+# produce a guard that blocks every write with a confusing reason.
+for _candidate in (HERE.parent / "scripts",
+                   HERE.parent.parent.parent / "scripts"):
+    if (_candidate / "dispatch_state.py").is_file():
+        sys.path.insert(0, str(_candidate))
+        break
 
 WRITE_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
 PATH_KEYS = ("file_path", "notebook_path", "path")
