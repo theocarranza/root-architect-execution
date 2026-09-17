@@ -1,0 +1,25 @@
+{
+  "task": "Task 1 spec check — slugify diff against the settled slug rule",
+  "attempt": 1,
+  "max_attempts": 3,
+  "role": "spec-validator",
+  "model": "haiku",
+  "effort": "low",
+  "read_paths": ["src/slugify.py", "tests/test_slugify.py", ".root-architect/briefs/20260917-e2e/implement-slugify.json"],
+  "write_paths": [],
+  "acceptance": [
+    {
+      "command": "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v",
+      "expect": "judged by reading only — you have no shell by design, so leave commands_rerun empty"
+    }
+  ],
+  "constraints": [
+    "Reachability: the change is confined to src/slugify.py and tests/test_slugify.py, so reading those two files plus the implementer brief is the full evidence set.",
+    "Judge only plan compliance: does the diff implement the settled slug rule, and does the test suite actually assert it? Quality and defect hunting belong to a different validator.",
+    "The settled slug rule: lowercase; every non-ASCII-alphanumeric character is a separator; each run of separators collapses to one hyphen; leading and trailing hyphens are stripped.",
+    "commands_rerun MUST be empty. You have no shell; a non-empty list means the roles were combined.",
+    "Check specifically that a test asserts slugify('Hello,  World!') == 'hello-world', and that the six required cases from the implementer brief are covered."
+  ],
+  "owner_owned_paths": [],
+  "expected_result": "PASS if the diff implements the settled slug rule and the suite asserts it, including the six required cases. Otherwise FINDINGS naming each gap against the brief."
+}

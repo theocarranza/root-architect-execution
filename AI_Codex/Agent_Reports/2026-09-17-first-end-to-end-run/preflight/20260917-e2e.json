@@ -1,0 +1,27 @@
+{
+  "run_id": "20260917-e2e",
+  "host": "claude-code",
+  "checked_at": "2026-09-17T18:18:43.203760+00:00",
+  "passed": true,
+  "observed": {
+    "tools": [
+      "Read",
+      "Edit",
+      "Write",
+      "Bash",
+      "Agent"
+    ],
+    "agent_types": [
+      "root-architect-execution:orchestrator"
+    ]
+  },
+  "expected": {
+    "delegate_tools": [
+      "Agent"
+    ],
+    "agent_types": [
+      "root-architect-execution:orchestrator"
+    ]
+  },
+  "refusals": []
+}

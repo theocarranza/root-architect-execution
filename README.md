@@ -141,6 +141,13 @@ You do not have to remember this. Root checks the capability at startup and
 refuses to orchestrate without it, so a missing prerequisite stops the run with
 a reason instead of quietly producing an unisolated one.
 
+## State of the work
+
+`HANDOFF.md` carries what is done, what is open, and how to reproduce the
+end-to-end run. The short version: both ADRs are closed except Cursor, which is
+blocked on sourcing rather than engineering, and the root half of the protocol
+has been run for real — see [[First End-to-End Run]].
+
 ## Starting a session as root
 
 Root is a **mode, not a command**. There is no slash command that turns an

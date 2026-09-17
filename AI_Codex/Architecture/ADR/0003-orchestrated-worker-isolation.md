@@ -31,6 +31,16 @@ Sequencing status, against the five phases below:
    session where that scope did not bind (D11).
 5. `thermos-claude` disposition — **done**: PR #1 closed unmerged, 2026-09-17.
 
+> **Run 2026-09-17.** The topology was exercised for the first time by a real
+> `claude --agent root-architect` process against an installed bundle. D10 and
+> D11 are now empirically confirmed rather than unit-tested: root saw exactly
+> `root-architect-execution:orchestrator` as its dispatchable type, the same
+> bundle launched without `--agent` saw eleven types including all three
+> workers, and `root_preflight.py` passed the first observation and refused the
+> second. The run stopped at the agent process's own session limit after the
+> task envelope was posted, so **orchestrator → worker remains unobserved**.
+> Findings: [[First End-to-End Run]]. Next steps: `HANDOFF.md`.
+
 ## Context
 
 Two review sessions, four reviewer passes, one pull request. The subject was

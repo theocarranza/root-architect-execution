@@ -1,0 +1,31 @@
+{
+  "task": "Task 1 — slugify: drop punctuation and collapse separator runs",
+  "attempt": 1,
+  "max_attempts": 3,
+  "role": "implementer",
+  "model": "haiku",
+  "effort": "medium",
+  "read_paths": ["src/slugify.py", "README.md"],
+  "write_paths": ["src/slugify.py", "tests/test_slugify.py"],
+  "interfaces": [
+    "slugify(title) keeps its name, its single positional parameter, and returns a str",
+    "src/slugify.py stays importable as `from slugify import slugify` with src/ on PYTHONPATH; do not turn src/ into a package and do not add __init__.py"
+  ],
+  "acceptance": [
+    {
+      "command": "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v",
+      "expect": "all pass, including a case asserting slugify('Hello,  World!') == 'hello-world'"
+    }
+  ],
+  "constraints": [
+    "Reachability: src/slugify.py defines one pure function with no imports, and nothing else in this repository imports it (README.md is prose only). The unittest suite over tests/ is therefore the full reachable set; there is no wider baseline to run.",
+    "pytest is NOT installed in this environment. Use unittest from the standard library only. A report claiming a pytest run is false evidence.",
+    "The tests directory does not exist yet; create tests/test_slugify.py. Create nothing outside write_paths.",
+    "TDD is required: write the failing test first and record the observed RED counts, then implement and record the observed GREEN counts. Both phases must be real observed output, not predicted.",
+    "Do not run git add, git commit, or any other Git mutation. Root commits.",
+    "The slug rule, which is settled and not yours to redesign: lowercase the input; treat every character that is not an ASCII letter or digit as a separator; collapse each run of one or more separators into a single hyphen; strip leading and trailing hyphens.",
+    "Cover at least these cases in tests: 'Hello,  World!' -> 'hello-world'; 'Top 10!' -> 'top-10'; '  padded  ' -> 'padded'; 'a - b' -> 'a-b'; '!!!' -> ''; '' -> ''."
+  ],
+  "owner_owned_paths": [],
+  "expected_result": "slugify('Hello,  World!') returns 'hello-world'. Punctuation is removed rather than retained, and any run of spaces or punctuation becomes exactly one hyphen, with no leading or trailing hyphen in the result."
+}
