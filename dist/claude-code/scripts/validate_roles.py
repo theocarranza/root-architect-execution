@@ -143,12 +143,20 @@ def check_root(role_file, role, problems):
     # prohibition the guard enforces. Either alone is a claim.
     if "interfere-with-dispatch" not in role["must_not"]:
         problems.append("roles/%s does not declare interfere-with-dispatch, but "
-                        "hooks/root_write_guard.py refuses root's writes inside "
+                        "the write guard refuses root's writes inside "
                         "an open dispatch. The agent file would omit the one "
                         "prohibition the shipped hook enforces" % role_file)
-    if not (ROOT / "hooks" / "root_write_guard.py").is_file():
-        problems.append("roles/%s declares interfere-with-dispatch, but "
-                        "hooks/root_write_guard.py is not there to enforce it"
+    # Two named positions, because this gate runs in two trees. In the
+    # repository ADR 0001 step 3 put the hooks under adapters/<host>/hooks/,
+    # one per host that ships them; in an installed bundle the layout has
+    # already placed them at hooks/. Root's manifest is host-independent, so
+    # what it needs is that SOME position holds the guard - a prohibition
+    # nothing anywhere enforces is the claim this pairing exists to catch.
+    guards = (sorted((ROOT / "adapters").glob("*/hooks/root_write_guard.py"))
+              + [ROOT / "hooks" / "root_write_guard.py"])
+    if not any(guard.is_file() for guard in guards):
+        problems.append("roles/%s declares interfere-with-dispatch, but no "
+                        "adapter ships hooks/root_write_guard.py to enforce it"
                         % role_file)
 
 

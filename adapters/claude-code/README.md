@@ -10,17 +10,53 @@ for byte against `dist/claude-code/`, so the bundle cannot drift from the
 sources it claims to come from.
 
 Sources resolve against this directory first and the repository root second.
-That ordering is deliberate: moving `hooks/` in here later is a `git mv`, not a
-layout change, because the adapter copy simply starts winning.
+That ordering is why ADR 0001 step 3 was a `git mv`: the layout entry
+`"hooks/": "hooks/"` did not change, the adapter copy simply started winning.
 
-## Why the bundle is the plugin
+## What lives here
 
-`bundle_root` is `.` because `.claude-plugin/marketplace.json` declares
+| | |
+|---|---|
+| `hooks/` | The two PreToolUse guards and their wiring. Moved from the repository root by ADR 0001 step 3 |
+| `manifest.template.json` | Becomes `.claude-plugin/plugin.json` in the bundle |
+| `marketplace.template.json` | Becomes `.claude-plugin/marketplace.json` in the bundle |
+| `agent-interface.json` | What this host offers, per claim, with provenance |
+| `layout.json` | Where each piece lands |
+
+No agent files are authored here. They are generated from `roles/` into
+`agents/`, and ADR 0001's rule that no host-specific copy of a role is ever
+hand-written is what keeps this directory from becoming the drift table that
+rule exists to prevent.
+
+## Why the bundle is the plugin, and the repository root is not
+
+`bundle_root` is `.` because `marketplace.template.json` declares
 `"source": "./"`. Claude Code installs a marketplace directory source directly,
 so this host needs no installer — a fact [[0001-host-adapters-as-directories-with-generated-agents]]
 calls "luck, not design", since Codex needs `scripts/install_codex.py` and
 Cursor has no install path at all. A host that nests its plugin inside the
 bundle sets `bundle_root` to that subdirectory instead.
+
+Since the manifests moved in here, `dist/claude-code/` is the only loadable
+plugin. Develop against it — `claude plugin marketplace add ./dist/claude-code`
+— and rebuild after editing a source.
+
+One sharp edge, found while making this move: `claude plugin validate .`
+at the repository root does **not** fail now. It switches from validating the
+marketplace manifest to validating components, and exits 0 either way. So the
+command that exists to catch a manifest disagreeing with itself keeps reporting
+success while no longer looking at a manifest. CI greps for the
+`Validating marketplace manifest` line for that reason, and the suite asserts
+the name-and-version agreement directly rather than trusting the CLI's mode.
+
+### Two scripts that run from two places
+
+`root_write_guard.py` needs `dispatch_state.py`, and `render_agents.py` needs
+the plugin name. Both live at one path in this tree and a different one in an
+installed bundle, so both name **two positions in order** rather than searching
+upward. A search would find any directory called `scripts/`; the guard fails
+closed on an import error, so a wrong hit would not be a clean failure, it would
+be a guard denying every write with a baffling reason.
 
 ## Capabilities available here that we do not use
 

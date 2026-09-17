@@ -246,7 +246,7 @@ def delegation_scope(role, host):
 
     types = scope.get("separator", ", ").join(
         (scope.get("type_template") or "{id}").format(
-            plugin=plugin_name(), id=name) for name in declared)
+            plugin=plugin_name(host["host"]), id=name) for name in declared)
     scoped = [scope["template"].format(tool=name, types=types)
               for name in tool_names]
 
@@ -270,15 +270,39 @@ def delegation_scope(role, host):
            if main_thread_only else ""))
 
 
-def plugin_name():
+def plugin_name(host_name):
     """The name the host loads this plugin's agents under.
 
-    Read from the plugin manifest rather than hardcoded, because it is the same
-    string in two places otherwise and a rename would leave root's type list
-    pointing at agents that no longer answer to those names.
+    Read from that host's manifest template rather than hardcoded, because it
+    is the same string in two places otherwise and a rename would leave root's
+    type list pointing at agents that no longer answer to those names.
+
+    Per host since ADR 0001 step 3 moved the manifest into the adapter, which
+    is also more correct than the single root copy it replaced: nothing says
+    two hosts must name the same plugin the same way, and Codex's manifest is
+    already a separate file.
     """
-    manifest = ROOT / ".claude-plugin" / "plugin.json"
-    return json.loads(manifest.read_text(encoding="utf-8"))["name"]
+    layout = ROOT / "adapters" / host_name / "layout.json"
+    candidates = [ROOT / "adapters" / host_name / "manifest.template.json"]
+    if layout.is_file():
+        # Inside an installed bundle the template is gone and its content sits
+        # wherever the layout placed it. Reading the destination out of the
+        # layout keeps this general: a host that nests its plugin under a
+        # subdirectory is handled by its own layout entry, not by a second
+        # branch here.
+        place = json.loads(layout.read_text(encoding="utf-8")).get("place", {})
+        for source, destination in place.items():
+            if source == "manifest.template.json":
+                candidates.append(ROOT / destination)
+    for candidate in candidates:
+        if candidate.is_file():
+            return json.loads(candidate.read_text(encoding="utf-8"))["name"]
+    raise SystemExit(
+        "cannot find %s's plugin manifest; looked at %s. The name this host "
+        "loads the plugin's agents under is not guessable: a scoped dispatch "
+        "grant written against a wrong name matches no agent at all, and the "
+        "frontmatter still looks correct."
+        % (host_name, ", ".join(str(c) for c in candidates)))
 
 
 def resolve_tools(role, host):

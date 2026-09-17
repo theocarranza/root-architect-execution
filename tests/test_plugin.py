@@ -18,7 +18,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
-HOOKS = ROOT / "hooks"
+# ADR 0001 step 3 moved the hooks into the adapter that ships them. The
+# constant follows rather than the tests each learning the new path: at
+# runtime they still land at <plugin root>/hooks/, which is what the
+# guards' own messages refer to.
+HOOKS = ROOT / "adapters" / "claude-code" / "hooks"
 sys.path.insert(0, str(SCRIPTS))
 
 from jsonschema_mini import Validator  # noqa: E402
@@ -773,7 +777,7 @@ class AdapterBuildTests(unittest.TestCase):
 
     def test_expectations_are_derived_from_the_sources(self):
         """Add a role and the gate must demand it without being edited."""
-        want = smoke_install.expectations()
+        want = smoke_install.expectations("claude-code")
         roles = sorted(p.stem for p in (ROOT / "roles").glob("*.json"))
         self.assertEqual(want["agents"], roles)
         self.assertEqual(want["hooks"], ["PreToolUse"],
@@ -786,7 +790,8 @@ class AdapterBuildTests(unittest.TestCase):
         matched the host report's own "Hooks (1)" heading -- an assertion that
         passed whatever shipped.
         """
-        self.assertNotIn("hooks", smoke_install.expectations()["hooks"])
+        self.assertNotIn("hooks",
+                         smoke_install.expectations("claude-code")["hooks"])
 
     def test_missing_hook_targets_are_reported_not_raised(self):
         """Registration is not reachability.
@@ -2672,7 +2677,7 @@ class RootAgentTests(unittest.TestCase):
         dispatch nothing, with a frontmatter that looks entirely correct.
         """
         tree = self.sandbox()
-        manifest = tree / ".claude-plugin/plugin.json"
+        manifest = tree / "adapters/claude-code/manifest.template.json"
         plugin = json.loads(manifest.read_text())
         plugin["name"] = "renamed-plugin"
         manifest.write_text(json.dumps(plugin, indent=2))
@@ -2820,10 +2825,12 @@ class RootAgentTests(unittest.TestCase):
                       result.stdout + result.stderr)
 
         tree = self.sandbox()
-        (tree / "hooks/root_write_guard.py").unlink()
+        for guard in tree.glob("adapters/*/hooks/root_write_guard.py"):
+            guard.unlink()
         result = self.gate(tree)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("is not there to enforce it", result.stdout + result.stderr)
+        self.assertIn("no adapter ships hooks/root_write_guard.py",
+                      result.stdout + result.stderr)
 
 
 class PreflightTests(unittest.TestCase):
@@ -2939,6 +2946,31 @@ class PreflightTests(unittest.TestCase):
         ok, why = root_preflight.passed(self.ws, self.RUN)
         self.assertFalse(ok)
         self.assertIn("will not parse", why)
+
+    def test_the_two_manifests_agree_with_each_other(self):
+        """The defect `claude plugin validate` exists to catch, pinned here too.
+
+        A version bump once moved plugin.json and left the marketplace entry
+        behind. That gate still runs in CI, but it now has to be pointed at
+        dist/claude-code: at the repository root the same command no longer
+        validates a manifest at all, it switches to validating components and
+        exits 0 either way. A check that keeps passing while no longer doing
+        its job is the shape this repository refuses, so the agreement is
+        asserted here where it cannot silently change mode.
+        """
+        adapter = ROOT / "adapters/claude-code"
+        manifest = json.loads(
+            (adapter / "manifest.template.json").read_text(encoding="utf-8"))
+        marketplace = json.loads(
+            (adapter / "marketplace.template.json").read_text(encoding="utf-8"))
+        entries = [p for p in marketplace["plugins"]
+                   if p["name"] == manifest["name"]]
+        self.assertEqual(len(entries), 1,
+                         "the marketplace names no entry for %r" % manifest["name"])
+        self.assertEqual(entries[0]["version"], manifest["version"],
+                         "plugin.json and the marketplace entry disagree on the "
+                         "version; plugin.json wins at install time and the "
+                         "marketplace entry is silently ignored")
 
     def test_the_check_runs_from_an_installed_bundle(self):
         """The gate has to work where the product runs, not only in the repo.

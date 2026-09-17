@@ -89,8 +89,9 @@ def expectations(host_name="claude-code"):
                 ).get("type_template") or "{id}"
     return {
         "delegate_tools": list(host["tool_map"].get("delegate") or []),
-        "agent_types": [template.format(plugin=render_agents.plugin_name(), id=name)
-                        for name in declared],
+        "agent_types": [template.format(
+            plugin=render_agents.plugin_name(host_name), id=name)
+            for name in declared],
     }
 
 

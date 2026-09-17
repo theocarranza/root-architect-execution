@@ -27,8 +27,25 @@ Sequencing status, against the four steps below:
    `hooks/hooks.json` as registered with its script present. Standing gate on
    every PR, in CI with `--require-cli` so an absent CLI fails rather than
    skips.
-3. Move mechanics into `adapters/claude-code/` — **not started**. The gate
-   that makes it safe now exists, which was the whole point of the ordering.
+3. Move mechanics into `adapters/claude-code/` — **done, 2026-09-17**. The
+   hooks and both manifest templates now live in the adapter; the layout entry
+   for the hooks did not change, because `resolve_source` was written to try
+   the adapter first. Step 2's gate did its job: the move was a `git mv` plus
+   four readers repointed, and every mismatch surfaced as a failing gate rather
+   than as a broken install.
+
+   Two consequences the ADR did not anticipate, both recorded in
+   `adapters/claude-code/README.md`:
+
+   - **The repository root is no longer a loadable plugin**, so development
+     points at `dist/claude-code/` and the loop gains a build step. That is
+     precisely the cost §Consequences names, now paid rather than predicted.
+   - **`claude plugin validate .` does not fail at the root.** It switches to
+     validating components and exits 0, so the gate kept reporting success
+     while no longer reading a manifest. CI now targets the bundle and greps
+     for the marketplace line, and the suite asserts the name-and-version
+     agreement directly.
+
 4. Move Codex, then Cursor — **not started**.
 
 ## Context
@@ -257,8 +274,7 @@ possible, not consequences of it.
    **Done.** Built for `claude-code`, whose bundle is the plugin itself, so the
    gate was provable before any file moved.
 3. Introduce `adapters/claude-code/` and `build_adapter.py`, with `dist/` byte-gated.
-   The directory and the builder exist; the *mechanics* (hooks, manifest
-   templates) have not moved into it yet.
+   **Done.** The directory, the builder and the mechanics are all in place.
 4. Move Codex, then Cursor.
 
 Step 2 before step 3 is the load-bearing order. Building the migration first and

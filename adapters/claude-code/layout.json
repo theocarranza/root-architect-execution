@@ -1,11 +1,13 @@
 {
   "host": "claude-code",
   "bundle_root": ".",
-  "description": "Claude Code installs a marketplace directory source directly, so this host's bundle is the plugin itself with the development surface removed. bundle_root is '.' because marketplace.json declares source './'; a host that nests its plugin inside the bundle sets this to that subdirectory. roles/ and hosts/ are NOT development surface, although they look like it: the bundle ships validate_roles.py, render_agents.py and root_preflight.py, and all three read those manifests - along with adapters/<host>/agent-interface.json, which is what decides whether a delegating role may be built here at all. Only THIS host's manifest and interface ship: the others name bundled_dir paths that a Claude Code install has no reason to carry, and the capability gate would then report every one of them as ungenerated. Without them the capability gate the README tells root to run before dispatching reports that no role fills any position, and root's startup check cannot derive what it is checking against - a gate that cannot run in the product is worse than none, because the protocol still says it ran.",
+  "description": "Claude Code installs a marketplace directory source directly, so this host's bundle is the plugin itself. bundle_root is '.' because marketplace.template.json declares source './'; a host that nests its plugin inside the bundle sets this to that subdirectory. roles/ and hosts/ are NOT development surface, although they look like it: the bundle ships validate_roles.py, render_agents.py and root_preflight.py, and all three read those manifests - along with adapters/<host>/agent-interface.json, which is what decides whether a delegating role may be built here at all. layout.json ships too, because render_agents reads it to find where the plugin manifest landed - inside the bundle the template is gone and only its placed copy remains. Only THIS host's capability manifest and its interface FILE ship: the other hosts name bundled_dir paths a Claude Code install has no reason to carry, and the rest of this adapter directory is the mechanics the bundle already carries in their installed positions - shipping the directory whole would put a second copy of the hooks and both manifests inside the bundle. Since ADR 0001 step 3 the hooks and the two manifests live here rather than at the repository root, so dist/claude-code/ is the only loadable plugin - the repository root is no longer one. That is the point: what gets reviewed and what gets installed are the same tree, and the byte gate proves it.",
   "place": {
-    ".claude-plugin/": ".claude-plugin/",
+    "marketplace.template.json": ".claude-plugin/marketplace.json",
+    "manifest.template.json": ".claude-plugin/plugin.json",
     "agents/": "agents/",
-    "adapters/claude-code/": "adapters/claude-code/",
+    "adapters/claude-code/agent-interface.json": "adapters/claude-code/agent-interface.json",
+    "adapters/claude-code/layout.json": "adapters/claude-code/layout.json",
     "hosts/claude-code.json": "hosts/claude-code.json",
     "roles/": "roles/",
     "hooks/": "hooks/",
