@@ -28,6 +28,7 @@ import install_codex  # noqa: E402
 import build_adapter  # noqa: E402
 import smoke_install  # noqa: E402
 import validate_interfaces  # noqa: E402
+import mailbox  # noqa: E402
 
 
 @contextlib.contextmanager
@@ -1927,6 +1928,132 @@ class WorkerGitGuardTests(unittest.TestCase):
                               "stderr:\n%s" % (result.returncode, result.stderr))
                 self.assertEqual(result.returncode, expected)
                 self.assertNotIn("Traceback", result.stderr)
+
+
+class MailboxTests(unittest.TestCase):
+    """The four properties the mailbox exists to make true.
+
+    Each test here fails if the property is removed from mailbox.py. They are
+    written against behaviour, not implementation, so a rewrite that keeps the
+    guarantees keeps the tests.
+    """
+
+    def setUp(self):
+        self.workspace = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.workspace, ignore_errors=True)
+
+    def post(self, **kwargs):
+        kwargs.setdefault("workspace", str(self.workspace))
+        kwargs.setdefault("run_id", "r1")
+        kwargs.setdefault("persisted_by", "orchestrator")
+        return mailbox.post(**kwargs)
+
+    def dispatch_and_report(self, body=b"done\n"):
+        self.post(kind="task", sender="orchestrator", recipient="worker:implementer",
+                  body=b"do the thing\n")
+        return self.post(kind="report", sender="worker:implementer",
+                         recipient="orchestrator", body=body)
+
+    # --- verbatim ---------------------------------------------------------
+
+    def test_body_survives_byte_for_byte(self):
+        """Trailing whitespace, unicode and blank lines all survive.
+
+        These are exactly what a well-meaning 'clean up the output' step
+        destroys, and D5 exists because a reviewer needs the worker's words
+        rather than a tidied paraphrase of them.
+        """
+        awkward = b"verdict   \n\xe2\x9c\x93 \xc3\xa9\ttab\n\n\n"
+        path = self.dispatch_and_report(body=awkward)
+        _, body = mailbox.parse_envelope(path.read_bytes())
+        self.assertEqual(body, awkward)
+
+    def test_an_edited_body_fails_verification(self):
+        """Verbatim is checkable, not merely promised."""
+        path = self.dispatch_and_report()
+        with path.open("ab") as handle:
+            handle.write(b"I never said this\n")
+
+        problems = mailbox.verify(str(self.workspace), "r1")
+        self.assertTrue(any("does not match its recorded hash" in p for p in problems),
+                        "a tampered envelope verified clean: %s" % problems)
+
+    # --- append-only ------------------------------------------------------
+
+    def test_an_envelope_is_never_overwritten(self):
+        self.post(kind="task", sender="orchestrator",
+                  recipient="worker:implementer", body=b"first\n")
+        with self.assertRaises(mailbox.MailboxError) as caught:
+            self.post(kind="task", sender="orchestrator",
+                      recipient="worker:implementer", body=b"second\n", seq=1)
+        self.assertIn("append-only", str(caught.exception))
+
+    def test_numbering_refuses_to_work_around_an_unreadable_envelope(self):
+        """Skipping one silently reuses a sequence number.
+
+        An earlier revision skipped, and two envelopes both came out as seq 1 -
+        the module's own failure mode, committed by the module.
+        """
+        self.post(kind="task", sender="orchestrator",
+                  recipient="worker:implementer", body=b"fine\n")
+        broken = mailbox.mailbox_dir(str(self.workspace), "r1") / "0009-junk.md"
+        broken.write_bytes(b"not an envelope at all\n")
+
+        with self.assertRaises(mailbox.MailboxError) as caught:
+            self.post(kind="report", sender="worker:implementer",
+                      recipient="orchestrator", body=b"hello\n")
+        self.assertIn("will not parse", str(caught.exception))
+
+    # --- workers never write ----------------------------------------------
+
+    def test_a_worker_cannot_be_recorded_as_the_writer(self):
+        """D9. A worker holding a write tool is a grant that should not exist."""
+        with self.assertRaises(mailbox.MailboxError) as caught:
+            self.post(kind="report", sender="worker:implementer",
+                      recipient="orchestrator", persisted_by="worker:implementer",
+                      body=b"hello\n")
+        self.assertIn("persisted_by", str(caught.exception))
+
+    def test_a_worker_may_still_be_the_author_of_its_report(self):
+        """The worker's words are the worker's; only the writing is not."""
+        path = self.dispatch_and_report()
+        header, _ = mailbox.parse_envelope(path.read_bytes())
+        self.assertEqual(header["from"], "worker:implementer")
+        self.assertEqual(header["persisted_by"], "orchestrator")
+
+    # --- silence is never success -----------------------------------------
+
+    def test_a_dispatched_task_with_no_answer_is_a_problem(self):
+        self.post(kind="task", sender="orchestrator",
+                  recipient="worker:implementer", body=b"do it\n")
+        problems = mailbox.verify(str(self.workspace), "r1")
+        self.assertTrue(any("nothing came back" in p for p in problems),
+                        "a vanished task verified clean: %s" % problems)
+
+    def test_sealing_the_silence_resolves_it(self):
+        self.post(kind="task", sender="orchestrator",
+                  recipient="worker:implementer", body=b"do it\n")
+        self.post(kind="failure", sender="worker:implementer",
+                  recipient="orchestrator", body=b"nothing returned\n",
+                  failure_mode="killed")
+        self.assertEqual(mailbox.verify(str(self.workspace), "r1"), [])
+
+    def test_a_failure_envelope_must_name_its_mode(self):
+        """'It failed' without saying how is the silence this replaces."""
+        with self.assertRaises(mailbox.MailboxError) as caught:
+            self.post(kind="failure", sender="worker:implementer",
+                      recipient="orchestrator", body=b"nope\n")
+        self.assertIn("failure_mode", str(caught.exception))
+
+    # --- diagnostics, not tracebacks --------------------------------------
+
+    def test_a_malformed_envelope_is_reported_not_raised_as_a_traceback(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/mailbox.py"),
+             "--workspace", str(self.workspace), "verify", "--run-id", "r1"],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 class AgentInterfaceTests(unittest.TestCase):
