@@ -3,7 +3,7 @@ type: pattern
 area: orchestration
 tags: [pattern, orchestration, dispatch, nesting, fallback]
 created: 2026-09-17
-status: specified, not built - candidate to replace D12 rather than back it up
+status: specified, not built - fallback to D12, not a replacement for it
 ---
 
 # Script Dispatch
@@ -13,9 +13,18 @@ performs the dispatch by launching each worker as a **separate process**, not as
 a nested subagent.
 
 Recorded 2026-09-17 as the specified fallback to
-[[0003-orchestrated-worker-isolation]] D12. **Reclassified the same day**: the
-one risk that made it a fallback was measured and did not hold, so it is now a
-candidate to replace D12 rather than to back it up. Not currently built.
+[[0003-orchestrated-worker-isolation]] D12. Not currently built.
+
+**Scope correction, same day.** An earlier revision of this note argued the
+pattern might replace D12 outright, on the grounds that a script cannot drift
+and that the orchestrator had little left to decide. The operator corrected it:
+the orchestrator is an agent, and that was never in question. What it decides is
+the substance of the job - it receives worker output and judges it, chooses what
+to delegate next, puts questions to root through the mailbox, and decides on the
+answers it gets back. D7's deterministic code is the **job queue underneath the
+orchestrator**, not a replacement for it. This pattern changes how a worker is
+LAUNCHED. It does not move the judgment out of the agent, and nothing here
+should be read as proposing that.
 
 ## Why it exists
 
@@ -26,25 +35,16 @@ managed or hermetic environment where the operator cannot set variables at all,
 and a ceiling that overrides it, which the [[Subagent Nesting Cap Re-Test]]
 protocol exists to detect.
 
-## Why it may be the better design outright
+## What it buys, and what it does not
 
-Three arguments, in increasing order of weight:
+It buys one thing: **workers stop being nested subagents**, so
+`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` stops being a dependency. That is the
+whole reason to reach for it, and it only matters when the cap is unusable.
 
-1. **It needs no nesting at all**, so the remotely-defaulted cap stops being a
-   dependency rather than being worked around.
-2. **A script cannot drift, be re-prompted, or be prompt-injected.** An LLM
-   orchestrator can, and the orchestrator is the component whose whole job is to
-   be the trustworthy boundary. On the isolation requirement as the operator
-   stated it — that orchestration proceed independently of root — deterministic
-   code is a stronger answer than a well-instructed agent.
-3. **It is deterministically testable**, which is what makes a guarantee here
-   worth stating at all.
-
-Against that: what does the orchestrator actually decide? Root owns the plan,
-the loop order is fixed, `check_return.py` already validates verdict shape, and
-a verdict carries its own pass or fail. "Rejected, so escalate to root" is
-mechanical. There is little judgment left to house in an agent — which is D7's
-point, followed to its conclusion.
+It does **not** change where judgment lives. The orchestrator is still an agent
+that reads what came back, decides, delegates again, and talks to root. Launching
+a worker as a process rather than dispatching it as a subagent changes the
+mechanism of one step in that loop and nothing else about the design.
 
 ## Why it is not merely a workaround
 
@@ -131,10 +131,9 @@ child process.
 
 ## What would have to be true to adopt it
 
-1. ~~The nesting cap is unusable.~~ **No longer a precondition.** This pattern
-   does not use nested delegation at all, so it is available whatever the cap
-   says — and adopting it would remove D12's dependency on a remotely-defaulted
-   environment variable rather than working around it.
+1. **The nesting cap is unusable** — the re-test protocol reports
+   `Both NO_AGENT`, or the target environment forbids setting the variable.
+   This remains the trigger; the pattern is not adopted for its own sake.
 2. ~~Worker identity reaches the guard.~~ **Measured and satisfied**, see above.
 3. The launch mechanism is sourced for each host in scope, to D1's standard.
    Only `claude-code` is, today.
@@ -142,5 +141,6 @@ child process.
    process.
 
 Item 2 was the one that could have made this pattern cost more than it saves.
-It did not. What remains is item 3, which is portability work rather than a
-risk to the pattern itself, and item 4, which is one probe.
+It did not, so the fallback is now known to be viable rather than merely
+plausible — which is worth having recorded before it is ever needed. Items 3
+and 4 remain, and neither is a risk to the pattern so much as work it implies.

@@ -100,6 +100,13 @@ the only thing that makes a guarantee here worth stating.
 plus the worker criteria: constrained grant, independent model and effort,
 fresh context, no nested delegation.
 
+The orchestrator is an **agent**, not a script, and the distinction is not
+incidental. It receives each worker's output and judges it, decides what to
+delegate next, sends questions to root through the mailbox, and decides on the
+answers it receives. D7's deterministic code is the job queue it drives — the
+mechanics of ordering, state and retry bookkeeping — not a substitute for that
+judgment. Reading D7 as "the orchestrator is a script" inverts the design.
+
 **D9 — Workers never write their own envelopes.** This resolves a
 contradiction that broke the closed pull request: a worker constrained enough
 to be trusted holds no write tool, so it *cannot* write a handoff. Cursor's
@@ -200,12 +207,15 @@ rewrites dispatch while leaving the protocol intact.
 That pattern's one unmeasured risk — whether a worker launched as its own
 process still reports the `agent_type` this repository's guards key on — **was
 measured on 2026-09-17 and does not hold**. Identity travels with `--agent`,
-not with being a subagent. Script dispatch is therefore not merely a fallback:
-it needs no nesting, so it would remove D12's dependency on a remotely-defaulted
-variable rather than work around it, and a script cannot drift or be
-prompt-injected where an agent orchestrator can. **D12 stands as the measured,
-lower-risk path to a working Phase 4; whether the orchestrator should remain an
-agent at all is now an open question rather than a settled one.**
+not with being a subagent, so the guards keep working either way. The fallback
+is therefore known viable rather than merely plausible.
+
+It remains a fallback. A revision of that note briefly argued it could replace
+D12 by moving dispatch into a script; the operator corrected it. **The
+orchestrator is an agent** — it judges what workers return, chooses what to
+delegate next, puts questions to root and decides on the answers. D7's
+deterministic code is the job queue beneath it. Script dispatch changes only how
+a worker is launched, and is reached for only when nesting is unavailable.
 
 **A remotely-defaulted cap cannot be declared once.** Because the default is a
 feature value rather than a release constant, an interface file recording
