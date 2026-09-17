@@ -15,8 +15,13 @@ What Claude Code's subagent system actually guarantees, and what it costs
 
 Branch of origin: `fix/guard-fails-closed-on-untrusted-dispatch-state`. Recorded
 as research on 2026-09-14, with no code change at the time. §7 findings 1–3 were
-corrected on 2026-09-16 in `9b3bf0a`; findings 4–6 are still open, and §8 says
-why they need a vocabulary the capability schema does not yet have.
+corrected on 2026-09-16 in `9b3bf0a`. Findings 4–6 were never errors — two are
+capabilities this host offers and this plugin declines, one is a hazard of the
+distribution channel — and they now live in `adapters/claude-code/README.md`
+with the condition for adopting each. §8 framed the open question as whether
+the capability schema needed new vocabulary;
+[[0001-host-adapters-as-directories-with-generated-agents]] answered it
+differently, and that answer is what gave them a home.
 
 ## 1. Why this exists
 
@@ -202,7 +207,7 @@ plausible future source of malformed-return retries.
 
 ## 7. Errors and gaps in `hosts/claude-code.json`
 
-Six, ordered by how wrong they are. **1–3 are fixed as of 2026-09-16 (`9b3bf0a`); 4–6 remain open.**
+Six, ordered by how wrong they are. **1–3 are fixed (`9b3bf0a`). 4–6 are not errors but declined capabilities and a channel hazard; they are now recorded in `adapters/claude-code/README.md`, with the conditions for adopting each.**
 
 1. **FIXED — `scoped_hooks` was `supported: true, field: "hooks"`, and is false for this plugin.**
    Plugin-shipped agents ignore `hooks`. The row's own `verified` note already

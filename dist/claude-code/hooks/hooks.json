@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/root_write_guard.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking delegation boundary"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|BashOutput|KillShell|PowerShell|Edit|Write|NotebookEdit|MultiEdit|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/worker_git_guard.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking worker grant"
+          }
+        ]
+      }
+    ]
+  }
+}

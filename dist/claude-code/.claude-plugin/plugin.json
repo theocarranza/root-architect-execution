@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "root-architect-execution",
+  "version": "0.1.1",
+  "description": "Root-architect execution protocol: root owns plan, Git and ledger; schema-declared isolated workers implement and review.",
+  "author": {
+    "name": "Theo Carranza",
+    "email": "theocarranza@gmail.com"
+  },
+  "skills": [
+    "./"
+  ]
+}

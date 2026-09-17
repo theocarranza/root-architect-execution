@@ -9,8 +9,27 @@ created: 2026-09-14
 
 ## Status
 
-Proposed — 2026-09-14. Supersedes nothing. Blocks nothing; the corrections in
-[[Claude Code Subagent Contract]] §7 land first and independently.
+Accepted, in progress — 2026-09-14, accepted 2026-09-16. Supersedes nothing.
+
+Sequencing status, against the four steps below:
+
+1. §7 corrections — **done** (`9b3bf0a`).
+2. `--check` over a built bundle — **done**. `scripts/build_adapter.py`
+   assembles `dist/claude-code/` from `adapters/claude-code/layout.json` plus
+   the repository core, and `--check` rebuilds into a temporary directory and
+   compares byte for byte. It is in the outcome gate and in CI.
+
+   Joined by `scripts/smoke_install.py`, which closes a gap the byte gate
+   cannot: `--check` proves the bundle was *copied* correctly and says nothing
+   about whether the host will *load* it. The smoke gate installs the built
+   bundle into a throwaway HOME and requires the host to report back every
+   role in `roles/` as an agent, the skill as a skill, and every event in
+   `hooks/hooks.json` as registered with its script present. Standing gate on
+   every PR, in CI with `--require-cli` so an absent CLI fails rather than
+   skips.
+3. Move mechanics into `adapters/claude-code/` — **not started**. The gate
+   that makes it safe now exists, which was the whole point of the ordering.
+4. Move Codex, then Cursor — **not started**.
 
 ## Context
 
@@ -191,7 +210,9 @@ edits to shared code. And the three findings that did not fit the schema get a
 home: `isolation: worktree` becomes an adapter decision recorded in that
 adapter's README, plugin-scope shadowing becomes a hazard documented where the
 manifest is built, and digest authorization becomes a module in
-`adapters/codex/hooks/` if we decide to build it.
+`adapters/codex/hooks/` if we decide to build it. The first two now live in
+`adapters/claude-code/README.md`, which is this claim discharged rather than
+merely asserted.
 
 **What this costs, and the specific risk.**
 
@@ -202,7 +223,11 @@ against a re-render, so a reviewer sees the artifact that ships. Introducing
 
 OQC's `BUILD-MANIFEST.json` is the right instinct but is not sufficient on its
 own: a path→hash list proves a bundle is internally consistent, not that it
-agrees with the source it claims to come from. The gate we need is a rebuild into
+agrees with the source it claims to come from. Nor, it turns out, is a byte
+comparison sufficient on its own either — it proves agreement with the source
+and still says nothing about whether the host accepts the result. Both gates
+are needed, and they fail on different things: probing found breakages each one
+catches and the other does not. The gate we need is a rebuild into
 a temporary directory and a byte comparison against `dist/`, exactly as
 `render_agents.py --check` already does for agent files. Until that exists, this
 migration would trade a guarantee we currently have for convenience — which is
@@ -229,7 +254,11 @@ possible, not consequences of it.
    shape. They are false statements shipping today and must not wait for a
    migration.
 2. Write `--check` over a built bundle, against today's single-host output.
+   **Done.** Built for `claude-code`, whose bundle is the plugin itself, so the
+   gate was provable before any file moved.
 3. Introduce `adapters/claude-code/` and `build_adapter.py`, with `dist/` byte-gated.
+   The directory and the builder exist; the *mechanics* (hooks, manifest
+   templates) have not moved into it yet.
 4. Move Codex, then Cursor.
 
 Step 2 before step 3 is the load-bearing order. Building the migration first and

@@ -94,7 +94,8 @@ marketplace while you work on it. Two things still bite:
 | `roles/*.json` | The three worker roles — model tier, reasoning strength, tool grant, mutation class |
 | `hosts/*.json` | What each host can actually express, with the date and evidence behind every claim |
 | `agents/*.md` | **Generated.** The Claude Code agent files |
-| `dist/<host>/` | **Generated.** Reference copies for other hosts |
+| `dist/<host>/` | **Generated.** `claude-code/` is a built, byte-gated bundle; `codex/` and `cursor/` are still reference agent copies |
+| `adapters/<host>/` | How one host's bundle is assembled — `layout.json` today, host mechanics as ADR 0001 proceeds |
 | `references/agents/*.md` | The role prose, written once and pointed at, never copied |
 | `references/contracts.md` | The four shapes the loop passes around |
 | `schemas/*.json` | Real JSON Schemas for roles, hosts, briefs, reports, verdicts, dispatch state |
@@ -120,25 +121,42 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/check_return.py" \
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" verify
 ```
 
-When contributing to *this* repo, the outcome gate is these five, and none of
+When contributing to *this* repo, the outcome gate is these seven, and none of
 them is optional:
 
 ```bash
 python3 -m unittest discover -s tests -t .
 python3 scripts/render_agents.py --host claude-code --check
 python3 scripts/render_agents.py --host codex --check
+python3 scripts/build_adapter.py --host claude-code --check
+python3 scripts/smoke_install.py --host claude-code
 claude plugin validate .
 python3.11 -m unittest discover -s tests -t .   # any 3.11+, for tomllib
 ```
 
-Each of the last three exists because the suite alone has been green over a
-real defect:
+Each of the five after the suite exists because the suite alone has been green
+over a real defect:
 
 - The tests do not read `.claude-plugin/`, so a manifest that disagrees with
   itself passes them cleanly. A version bump moved `plugin.json` and left the
   marketplace entry behind, and only `claude plugin validate` noticed.
 - `--check` is per host. A `hosts/codex.json` change leaves `agents/` in sync
   and `dist/codex/` stale.
+- `smoke_install.py` is the only gate that runs the **host** against the
+  artifact. Everything above reasons about files; this installs the built
+  bundle into a throwaway `HOME` and asks Claude Code to enumerate what it
+  found, failing unless every role in `roles/` came back as an agent, the skill
+  came back as a skill, and every event in `hooks/hooks.json` came back
+  registered with its script actually present. A bundle can be byte-perfect and
+  still not load — a manifest the host parses but rejects, a skill folder whose
+  name stopped matching its frontmatter — and no file comparison catches that.
+  It never touches your own plugin config, so it is safe to run locally.
+- `build_adapter.py --check` covers the *bundle*, not just the agent files. It
+  rebuilds into a temporary directory and compares byte for byte, because a
+  path-to-hash manifest proves a bundle is internally consistent and not that
+  it agrees with the source it came from — a bundle built from stale sources
+  hashes perfectly. Change anything under `scripts/`, `schemas/`, `hooks/` or
+  `references/` and `dist/claude-code/` is stale until you rebuild it.
 - The Codex agents are TOML, and `tomllib` is 3.11+. On a 3.10 interpreter with
   no `tomli` installed, every parser-backed assertion **skips** — so a
   generated manifest that no TOML parser would accept can ship green. Install
@@ -149,7 +167,7 @@ That last point is the outcome gate's own rule applied to this repo: a test
 suite only checks what it was written to check, and generated output is exactly
 the kind of artifact it can miss.
 
-`.github/workflows/outcome-gate.yml` runs all five on every push and pull
+`.github/workflows/outcome-gate.yml` runs all of them on every push and pull
 request, so the gate no longer depends on a contributor remembering it. Run
 them locally anyway — CI is the backstop, not the first line. The workflow
 refuses to run as root: the five tests that prove an unreadable dispatch state
