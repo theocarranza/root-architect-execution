@@ -132,15 +132,22 @@ def role_needs(role):
 
     needs = {}
     if "delegate" in allow:
-        # Every role in this project is DISPATCHED - root spawns it. So a role
-        # granted delegate is a spawned agent that spawns, which is nested
-        # delegation, not merely delegation. Deriving this from the grant is
-        # deliberate: a separate `requires_nested_delegation` key would be a
+        # Whether this is DELEGATION or NESTED delegation turns on one thing:
+        # is this role itself dispatched. Everything here is, except root,
+        # which runs as the main thread - so root granted delegate needs only
+        # delegation, while anything else granted delegate would be a spawned
+        # agent spawning.
+        #
+        # This read "every role in this project is DISPATCHED" until root
+        # existed, and the gate then refused root on cursor for resting on
+        # nesting root does not use. Deriving the need from the grant plus the
+        # kind is deliberate: a `requires_nested_delegation` key would be a
         # second place to state one fact, free to drift away from the first.
         needs["delegation"] = "the role is granted delegate"
-        needs["nested_delegation"] = (
-            "the role is granted delegate, and every role here is itself "
-            "dispatched - so it would be a spawned agent spawning")
+        if render_agents.is_dispatched(role):
+            needs["nested_delegation"] = (
+                "the role is granted delegate and is itself dispatched - so it "
+                "would be a spawned agent spawning")
     if "delegate" in deny or "spawn-agents" in must_not:
         needs["withhold_delegation"] = (
             "the role denies delegate or declares must_not spawn-agents")

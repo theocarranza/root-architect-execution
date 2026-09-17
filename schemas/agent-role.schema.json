@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://root-architect-execution/schemas/agent-role.schema.json",
   "title": "Agent role manifest",
-  "description": "The host-independent declaration of one worker role. This is the single source of truth for the role's model tier, reasoning strength, tool grant, and mutation class; every host agent file is generated from it by scripts/render_agents.py. Prose for the role lives in references/agents/<id>.md and is never duplicated here.",
+  "description": "The host-independent declaration of one agent in this architecture. This is the single source of truth for the agent's model tier, reasoning strength, tool grant, and mutation class; every host agent file is generated from it by scripts/render_agents.py. Prose lives in references/agents/<id>.md and is never duplicated here.",
   "type": "object",
   "required": [
     "id",
@@ -28,9 +28,10 @@
       "type": "string",
       "enum": [
         "worker",
-        "orchestrator"
+        "orchestrator",
+        "root"
       ],
-      "description": "What this manifest is FOR, which is not the same question as which position it fills. A worker is dispatched and returns a contract. The orchestrator dispatches workers, judges what they return, and talks to root through the mailbox. They differ in what `returns` and `mutation` even mean, so overloading `role` to cover both would make those fields conditional on a value buried elsewhere."
+      "description": "What this manifest is FOR, which is not the same question as which position it fills. A worker is dispatched and returns a contract. The orchestrator dispatches workers, judges what they return, and talks to root through the mailbox. Root is dispatched by nobody: it runs as the main thread, holds the operator channel, and dispatches only the orchestrator. That last difference is not cosmetic - every derivation in this repository that reasons about delegation asks whether the role is itself dispatched, because a dispatched agent that delegates needs NESTED delegation and a main-thread one does not."
     },
     "role": {
       "type": "string",
@@ -38,9 +39,10 @@
         "implementer",
         "spec-validator",
         "quality-validator",
-        "orchestrator"
+        "orchestrator",
+        "root"
       ],
-      "description": "Which position this manifest fills. The three worker positions are a fixed three-agent loop, not an extensible registry: exactly one manifest each, and `kind` is what keeps that invariant enforceable now that a fourth agent exists which is not a fourth worker."
+      "description": "Which position this manifest fills. The three worker positions are a fixed three-agent loop, not an extensible registry: exactly one manifest each, and so is the orchestrator, and so is root. `kind` is what keeps that invariant enforceable now that manifests exist which are not workers."
     },
     "description": {
       "type": "string",
@@ -141,24 +143,56 @@
           "edit-files",
           "run-commands",
           "handoff-to-peer",
-          "plan-work"
+          "plan-work",
+          "interfere-with-dispatch"
         ]
       },
-      "description": "Prohibitions the role carries. Entries that hooks/ can enforce mechanically are enforced; the rest are rendered into the agent's own instructions and into the enforcement disclosure."
+      "description": "Prohibitions the role carries. Entries that hooks/ can enforce mechanically are enforced; the rest are rendered into the agent's own instructions and into the enforcement disclosure. `interfere-with-dispatch` is root's: hooks/root_write_guard.py refuses a root write inside an open dispatch's write paths, so the manifest and the shipped guard must agree about it."
     },
     "returns": {
       "type": "string",
       "enum": [
         "implementer-report.schema.json",
         "validator-verdict.schema.json",
-        "orchestrator-outcome.schema.json"
+        "orchestrator-outcome.schema.json",
+        "none"
       ],
-      "description": "The contract this role must return, as a single fenced JSON block. Root validates the return with scripts/check_return.py before acting on it."
+      "description": "The contract this agent must return, as a single fenced JSON block. Root validates a worker's or the orchestrator's return with scripts/check_return.py before acting on it. Root itself returns `none`: it answers to the operator in prose, and there is nobody above it to validate a schema."
     },
     "prose": {
       "type": "string",
       "pattern": "^references/agents/[a-z0-9-]+\\.md$",
       "description": "Path to the canonical role prose. Host agent files point at it rather than restating it, so the role text exists in exactly one place."
+    },
+    "launch": {
+      "type": "object",
+      "required": [
+        "main_thread",
+        "delegates_to"
+      ],
+      "additionalProperties": false,
+      "description": "How this agent is started, and what it may start. Present only on a root manifest - every other agent in this architecture is dispatched, and a dispatched agent has no launch of its own to declare. scripts/validate_roles.py refuses it elsewhere; the schema cannot, having no `not`.",
+      "properties": {
+        "main_thread": {
+          "const": true,
+          "description": "Root runs as the main thread and only as the main thread. It is a constant rather than a boolean because there is no other value this architecture supports: the type restriction root's isolation rests on binds only for a main-thread agent, so a root launched any other way is a root whose boundary is not in force. See ADR 0003 D10."
+        },
+        "delegates_to": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "description": "The role ids root may dispatch, by `role` rather than by `id`. Rendered into the host's own scoping syntax where it has one, and disclosed as unenforced where it does not. Every entry must name a role manifest that exists, which is what stops this drifting into a list of agents nobody ships."
+        },
+        "initial_prompt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Submitted automatically when root starts, on hosts that support it. This is where the startup capability check of ADR 0003 D11 is triggered: a check root has to remember to run is a check that does not run on the session where it matters."
+        }
+      }
     }
   },
   "$defs": {
@@ -207,6 +241,12 @@
             "spec-validator",
             "quality-validator"
           ]
+        },
+        "returns": {
+          "enum": [
+            "implementer-report.schema.json",
+            "validator-verdict.schema.json"
+          ]
         }
       }
     },
@@ -217,8 +257,27 @@
         },
         "role": {
           "const": "orchestrator"
+        },
+        "returns": {
+          "const": "orchestrator-outcome.schema.json"
         }
       }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "root"
+        },
+        "role": {
+          "const": "root"
+        },
+        "returns": {
+          "const": "none"
+        }
+      },
+      "required": [
+        "launch"
+      ]
     }
   ]
 }

@@ -19,14 +19,16 @@ Sequencing status, against the five phases below:
 0. Branch reset after PR #2 merged — **done**.
 1. Interface files and their gate — **done** (this change).
 2. Role dependence checked against sourced capability — **done** (this change).
-3. The root agent as a main-thread agent — **research done 2026-09-17**,
-   build not started. The research replaced the decision it was meant to
-   confirm (see D11) and surfaced the nesting cap, resolved as D12.
-4. Orchestrator, workers, mailbox — **in progress**. The mailbox is built and
-   its four properties are enforced and mutation-tested. The orchestrator role
-   exists, renders, and registers on the host. The job queue is built, and
-   `verify` cross-checks it against the mailbox so the two records cannot drift
-   unnoticed. Still to build: root itself (D10, D11).
+3. The root agent as a main-thread agent — **done**. The research replaced the
+   decision it was meant to confirm (see D11) and surfaced the nesting cap,
+   resolved as D12; the build followed on 2026-09-17.
+4. Orchestrator, workers, mailbox — **done**. The mailbox is built and its four
+   properties are enforced and mutation-tested. The orchestrator role exists,
+   renders, and registers on the host. The job queue is built, and `verify`
+   cross-checks it against the mailbox so the two records cannot drift
+   unnoticed. Root is built: it renders as a main-thread agent with a
+   host-enforced dispatch scope (D10), and `root_preflight.py` refuses a
+   session where that scope did not bind (D11).
 5. `thermos-claude` disposition — **done**: PR #1 closed unmerged, 2026-09-17.
 
 ## Context
@@ -120,6 +122,24 @@ The constraint and the protocol stop fighting.
 this means for the product rather than the configuration, are recorded in
 [[Root as a Main-Thread Agent]].
 
+> **Built 2026-09-17.** `roles/root-architect.json` declares `kind: root` and a
+> `launch` block naming the one type root may dispatch; the renderer turns that
+> into `tools: ..., Agent(<plugin>:orchestrator)` on a host that declares it can
+> express the scope. Three consequences were only visible once it existed:
+>
+> - Every derivation in this repository that reasoned about delegation assumed
+>   the role was dispatched, and said so in a comment. Root is not, and a
+>   dispatched delegator needs NESTED delegation where root needs only
+>   delegation. The interface gate caught its own stale assumption by refusing
+>   root on Cursor for resting on nesting root does not use.
+> - The type name is derived from the plugin manifest, because a wrong one
+>   fails silently: it matches no agent, and root's frontmatter still looks
+>   entirely correct.
+> - `omitClaudeMd` is not available to root. The knowledge note claimed it was;
+>   the doc's own words say it is *ignored* for a main-session agent. Corrected
+>   there. Root inherits the operator's CLAUDE.md and cannot suppress it, which
+>   is a product constraint rather than a setting.
+
 **D11 — The fail-closed check asks about capability, not identity.** Phase 3
 set out to find a way for root to answer *"am I the main thread?"*. It cannot:
 a dispatched subagent's environment is byte-identical to its parent's, all 49
@@ -139,6 +159,22 @@ This is weaker than a host guarantee: it relies on the agent reading its own
 context honestly rather than on the runtime refusing. It is nonetheless a real
 check against the real failure, and it degrades in the safe direction — every
 way of losing the capability also makes the check fail.
+
+> **Built 2026-09-17** as `scripts/root_preflight.py`, on one division of
+> labour: **root supplies the observation, the script supplies the verdict.** A
+> check whose subject also decides whether it passed is not a check, and a
+> judgment written down is a judgment that can be tested — which the same
+> judgment held in an agent's head never can be.
+>
+> It is a gate rather than advice because `job_queue.init` refuses a run with no
+> passing record for it. Skipping the check therefore does not produce a run
+> that merely lacks a record; it produces no run.
+>
+> Scope is exactly the two questions above. The rest of the observed toolset is
+> recorded verbatim and not judged: hosts add tools of their own, so "observed
+> something ungranted" would fire on ordinary sessions, and a check that cries
+> wolf is a check somebody turns off. A refusal is written to disk as well as a
+> pass, so a refused run and an unchecked one do not look the same afterwards.
 
 ## Evidence base
 
@@ -230,6 +266,17 @@ what D11 does.
 capability check. The negative is empirically verified for environment
 variables specifically; an undocumented API or hook payload field could still
 carry the information.
+
+**Root is the sensor in its own check**, and an instrument cannot catch a sensor
+that lies. What D11 catches is every *accidental* way the boundary goes missing,
+which is every way it has actually gone missing so far and the only way it goes
+missing without somebody choosing to. The module says so in its own words rather
+than leaving a reader to infer the limit.
+
+**Root inherits the operator's CLAUDE.md with no way to suppress it**, per the
+D10 note above. Root's own instructions have to be specific enough to win a
+conflict with it, and a contradiction between the two is something root raises
+with the operator rather than resolving silently.
 
 **Cursor counsels against this shape**, quoted above. Our motive is isolation
 rather than decomposition depth, which is not what that warning addresses —
