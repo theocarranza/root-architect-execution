@@ -86,6 +86,36 @@ marketplace while you work on it. Two things still bite:
   and the marketplace entry is silently ignored, so drift is invisible until
   something installs the wrong thing. `claude plugin validate .` catches it.
 
+## Install prerequisite: the nesting cap
+
+Orchestration needs two levels of agent nesting — root dispatches the
+orchestrator, the orchestrator dispatches workers. Claude Code caps nesting at
+`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, and at the cap the `Agent` tool is
+withheld from the dispatched agent's toolset **entirely**, rather than offered
+and refused. So an orchestrator at the cap does not fail loudly; it simply has
+no way to dispatch.
+
+```bash
+export CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2
+```
+
+Two things worth knowing about that variable:
+
+- **It is read at process start.** Exporting it into a session already running
+  does nothing. Set it before launching.
+- **Its default is not a release constant.** Absent an explicit setting the
+  value comes from a remotely-controlled feature flag, so it can differ between
+  a local session and a web one, and can change with no local change at all.
+  Measured at `1` in a Claude Code web session on 2026-09-17.
+
+Verified rather than assumed, by an A/B probe of two fresh `claude -p`
+processes differing only in that variable: at `2` the dispatched subagent holds
+`Agent`, at `1` it does not.
+
+You do not have to remember this. Root checks the capability at startup and
+refuses to orchestrate without it, so a missing prerequisite stops the run with
+a reason instead of quietly producing an unisolated one.
+
 ## Layout
 
 | Path | What it is |
@@ -121,7 +151,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/check_return.py" \
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" verify
 ```
 
-When contributing to *this* repo, the outcome gate is these seven, and none of
+When contributing to *this* repo, the outcome gate is these eight, and none of
 them is optional:
 
 ```bash
@@ -129,12 +159,13 @@ python3 -m unittest discover -s tests -t .
 python3 scripts/render_agents.py --host claude-code --check
 python3 scripts/render_agents.py --host codex --check
 python3 scripts/build_adapter.py --host claude-code --check
+python3 scripts/validate_interfaces.py
 python3 scripts/smoke_install.py --host claude-code
 claude plugin validate .
 python3.11 -m unittest discover -s tests -t .   # any 3.11+, for tomllib
 ```
 
-Each of the five after the suite exists because the suite alone has been green
+Each of the six after the suite exists because the suite alone has been green
 over a real defect:
 
 - The tests do not read `.claude-plugin/`, so a manifest that disagrees with
@@ -157,6 +188,18 @@ over a real defect:
   it agrees with the source it came from — a bundle built from stale sources
   hashes perfectly. Change anything under `scripts/`, `schemas/`, `hooks/` or
   `references/` and `dist/claude-code/` is stale until you rebuild it.
+- `validate_interfaces.py` is the only gate that asks where a claim *came
+  from*. Every other gate checks that files agree with each other; this one
+  checks that what they agree on was ever sourced. Each
+  `adapters/<host>/agent-interface.json` records what that host offers with
+  per-claim provenance, and the gate refuses a role that depends on anything
+  marked `unsourced` — plus any drift between an interface and the
+  `hosts/*.json` the renderer actually reads. It exists because two review
+  sessions and four reviewer passes once argued about `disallowedTools`
+  precedence and MCP tool namespacing entirely from inference, reached two
+  confident and partly wrong conclusions, and nothing in the repository could
+  settle it. Absence from a corpus is not absence from an interface, and the
+  `unsourced` level is how that distinction stays writable.
 - The Codex agents are TOML, and `tomllib` is 3.11+. On a 3.10 interpreter with
   no `tomli` installed, every parser-backed assertion **skips** — so a
   generated manifest that no TOML parser would accept can ship green. Install

@@ -4,7 +4,19 @@
   "title": "Agent role manifest",
   "description": "The host-independent declaration of one worker role. This is the single source of truth for the role's model tier, reasoning strength, tool grant, and mutation class; every host agent file is generated from it by scripts/render_agents.py. Prose for the role lives in references/agents/<id>.md and is never duplicated here.",
   "type": "object",
-  "required": ["id", "role", "description", "mutation", "model", "reasoning", "tools", "must_not", "returns", "prose"],
+  "required": [
+    "id",
+    "kind",
+    "role",
+    "description",
+    "mutation",
+    "model",
+    "reasoning",
+    "tools",
+    "must_not",
+    "returns",
+    "prose"
+  ],
   "additionalProperties": false,
   "properties": {
     "id": {
@@ -12,10 +24,23 @@
       "pattern": "^[a-z][a-z0-9-]{1,48}[a-z0-9]$",
       "description": "Agent name as hosts see it. Lowercase and hyphens only, because Claude Code and Cursor both derive the invocation name from it."
     },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "worker",
+        "orchestrator"
+      ],
+      "description": "What this manifest is FOR, which is not the same question as which position it fills. A worker is dispatched and returns a contract. The orchestrator dispatches workers, judges what they return, and talks to root through the mailbox. They differ in what `returns` and `mutation` even mean, so overloading `role` to cover both would make those fields conditional on a value buried elsewhere."
+    },
     "role": {
       "type": "string",
-      "enum": ["implementer", "spec-validator", "quality-validator"],
-      "description": "Which of the three loop positions this manifest fills. Exactly one manifest per role: the loop is a fixed three-agent architecture, not an extensible agent registry."
+      "enum": [
+        "implementer",
+        "spec-validator",
+        "quality-validator",
+        "orchestrator"
+      ],
+      "description": "Which position this manifest fills. The three worker positions are a fixed three-agent loop, not an extensible registry: exactly one manifest each, and `kind` is what keeps that invariant enforceable now that a fourth agent exists which is not a fourth worker."
     },
     "description": {
       "type": "string",
@@ -24,51 +49,76 @@
     },
     "mutation": {
       "type": "string",
-      "enum": ["read-only", "read-and-run", "write-scoped"],
-      "description": "Portable capability class, and the thing hosts disagree about most. 'read-only' means no shell and no write tools. 'read-and-run' means a shell exists solely to rerun named acceptance commands. 'write-scoped' means edits are permitted, but only inside the brief's write paths — a boundary no host enforces, so a write-scoped role always carries an unenforced disclosure."
+      "enum": [
+        "read-only",
+        "read-and-run",
+        "write-scoped"
+      ],
+      "description": "Portable capability class, and the thing hosts disagree about most. 'read-only' means no shell and no write tools. 'read-and-run' means a shell exists solely to rerun named acceptance commands. 'write-scoped' means edits are permitted, but only inside the brief's write paths \u2014 a boundary no host enforces, so a write-scoped role always carries an unenforced disclosure."
     },
     "model": {
       "type": "object",
-      "required": ["default", "escalation"],
+      "required": [
+        "default",
+        "escalation"
+      ],
       "additionalProperties": false,
       "description": "Cheapest-viable tier plus the ordered escalation path. Never 'inherit': every host defaults to inheriting the parent, which silently makes a cheap worker as expensive as root.",
       "properties": {
-        "default": { "$ref": "#/$defs/modelTier" },
+        "default": {
+          "$ref": "#/$defs/modelTier"
+        },
         "escalation": {
           "type": "array",
-          "items": { "$ref": "#/$defs/modelTier" },
+          "items": {
+            "$ref": "#/$defs/modelTier"
+          },
           "description": "Ordered, strictly increasing tiers. Root advances exactly one step per recorded failure, never on a hunch."
         }
       }
     },
     "reasoning": {
       "type": "object",
-      "required": ["default", "escalation"],
+      "required": [
+        "default",
+        "escalation"
+      ],
       "additionalProperties": false,
       "description": "Reasoning strength. Expressed portably here; rendered into whatever each host actually supports, or disclosed as unenforced where it supports nothing.",
       "properties": {
-        "default": { "$ref": "#/$defs/effort" },
+        "default": {
+          "$ref": "#/$defs/effort"
+        },
         "escalation": {
           "type": "array",
-          "items": { "$ref": "#/$defs/effort" }
+          "items": {
+            "$ref": "#/$defs/effort"
+          }
         }
       }
     },
     "tools": {
       "type": "object",
-      "required": ["allow", "deny"],
+      "required": [
+        "allow",
+        "deny"
+      ],
       "additionalProperties": false,
       "description": "Portable tool intent. 'allow' is the complete grant; 'deny' is belt-and-braces for hosts that support a denylist, and documentation everywhere else.",
       "properties": {
         "allow": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/toolIntent" },
+          "items": {
+            "$ref": "#/$defs/toolIntent"
+          },
           "description": "The full grant. An empty shell grant is expressed by omitting 'run-commands', not by granting it and asking the agent not to use it."
         },
         "deny": {
           "type": "array",
-          "items": { "$ref": "#/$defs/toolIntent" }
+          "items": {
+            "$ref": "#/$defs/toolIntent"
+          }
         },
         "shell_purpose": {
           "type": "string",
@@ -82,13 +132,27 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "enum": ["commit", "stage", "spawn-agents", "widen-scope", "ask-owner", "edit-files", "run-commands", "handoff-to-peer"]
+        "enum": [
+          "commit",
+          "stage",
+          "spawn-agents",
+          "widen-scope",
+          "ask-owner",
+          "edit-files",
+          "run-commands",
+          "handoff-to-peer",
+          "plan-work"
+        ]
       },
       "description": "Prohibitions the role carries. Entries that hooks/ can enforce mechanically are enforced; the rest are rendered into the agent's own instructions and into the enforcement disclosure."
     },
     "returns": {
       "type": "string",
-      "enum": ["implementer-report.schema.json", "validator-verdict.schema.json"],
+      "enum": [
+        "implementer-report.schema.json",
+        "validator-verdict.schema.json",
+        "orchestrator-outcome.schema.json"
+      ],
       "description": "The contract this role must return, as a single fenced JSON block. Root validates the return with scripts/check_return.py before acting on it."
     },
     "prose": {
@@ -100,18 +164,61 @@
   "$defs": {
     "modelTier": {
       "type": "string",
-      "enum": ["cheap", "mid", "strong"],
+      "enum": [
+        "cheap",
+        "mid",
+        "strong"
+      ],
       "description": "Vendor-neutral tier. hosts/<host>.json maps each tier to that host's own model id, so a role manifest never names a vendor model."
     },
     "effort": {
       "type": "string",
-      "enum": ["low", "medium", "high", "xhigh", "max"],
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
       "description": "Reasoning strength, in Claude Code's vocabulary because it is the most granular of the supported hosts. hosts/<host>.json maps these onto coarser scales, and declares when a host can express none of them."
     },
     "toolIntent": {
       "type": "string",
-      "enum": ["read-files", "search-files", "edit-files", "create-files", "run-commands", "delegate"],
+      "enum": [
+        "read-files",
+        "search-files",
+        "edit-files",
+        "create-files",
+        "run-commands",
+        "delegate"
+      ],
       "description": "Portable intent, not a host tool name. hosts/<host>.json maps each intent to concrete tool names; an intent a host cannot express is a rendering error, not a silent drop."
     }
-  }
+  },
+  "anyOf": [
+    {
+      "properties": {
+        "kind": {
+          "const": "worker"
+        },
+        "role": {
+          "enum": [
+            "implementer",
+            "spec-validator",
+            "quality-validator"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "orchestrator"
+        },
+        "role": {
+          "const": "orchestrator"
+        }
+      }
+    }
+  ]
 }

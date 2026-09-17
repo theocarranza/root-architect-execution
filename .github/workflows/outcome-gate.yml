@@ -64,6 +64,13 @@ jobs:
       - name: Built bundle matches its sources
         run: python3 scripts/build_adapter.py --host claude-code --check
 
+      # What each host actually offers, and whether every role depends only
+      # on capabilities that host declares AND sources. An unsourced claim
+      # bears no weight: this is the gate that refuses a guarantee resting on
+      # inference rather than on the host's own words.
+      - name: Host interfaces are sourced, and roles rely only on what is
+        run: python3 scripts/validate_interfaces.py
+
       - name: Test suite
         run: python3 -m unittest discover -s tests -t .
 

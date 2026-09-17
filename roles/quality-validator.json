@@ -1,16 +1,45 @@
 {
   "id": "quality-validator",
+  "kind": "worker",
   "role": "quality-validator",
   "description": "Independent defect hunt on a diff whose plan-compliance pass already succeeded. Reruns exactly the acceptance commands the brief names, reports real defects with concrete failure scenarios, and returns the validator verdict as a single fenced JSON block. Fixes nothing; dispatched by a root architect and always a different agent from the plan-compliance validator.",
   "mutation": "read-and-run",
-  "model": { "default": "cheap", "escalation": ["mid", "strong"] },
-  "reasoning": { "default": "medium", "escalation": ["high", "xhigh"] },
+  "model": {
+    "default": "cheap",
+    "escalation": [
+      "mid",
+      "strong"
+    ]
+  },
+  "reasoning": {
+    "default": "medium",
+    "escalation": [
+      "high",
+      "xhigh"
+    ]
+  },
   "tools": {
-    "allow": ["read-files", "search-files", "run-commands"],
-    "deny": ["edit-files", "create-files", "delegate"],
+    "allow": [
+      "read-files",
+      "search-files",
+      "run-commands"
+    ],
+    "deny": [
+      "edit-files",
+      "create-files",
+      "delegate"
+    ],
     "shell_purpose": "Rerun exactly the acceptance commands the brief names and report the counts observed. Never to write, stage, or commit."
   },
-  "must_not": ["commit", "stage", "spawn-agents", "widen-scope", "ask-owner", "edit-files", "handoff-to-peer"],
+  "must_not": [
+    "commit",
+    "stage",
+    "spawn-agents",
+    "widen-scope",
+    "ask-owner",
+    "edit-files",
+    "handoff-to-peer"
+  ],
   "returns": "validator-verdict.schema.json",
   "prose": "references/agents/quality-validator.md"
 }
