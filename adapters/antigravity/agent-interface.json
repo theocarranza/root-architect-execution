@@ -1,0 +1,194 @@
+{
+  "host": "antigravity",
+  "retrieved": "2026-09-17",
+  "definition": {
+    "format": "markdown-yaml",
+    "locations": [
+      ".agents/agents/<name>.md",
+      ".agents/agents/<name>/agent.md",
+      "~/.gemini/config/agents/<name>/agent.md"
+    ],
+    "provenance": {
+      "level": "first-party-source",
+      "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+      "retrieved": "2026-09-17",
+      "quote": "Added support for defining custom agents using Markdown files (`agent.md`) with YAML frontmatter and H1-delimited system prompts.",
+      "caveat": "The format is first-party. The exact scan PATHS are corpus-derived from public repositories and from search summaries of antigravity.google/docs, which this project could not read directly - antigravity.google is blocked by the egress proxy here. The global directory is first-party-confirmed only negatively: a changelog entry fixes a panel that displayed '~/.gemini/antigravity-cli/ instead of ~/.gemini/config/', which establishes ~/.gemini/config/ as correct."
+    }
+  },
+  "fields": {
+    "name": {
+      "supported": true,
+      "type": "string",
+      "provenance": {
+        "level": "corpus-derived",
+        "source": "public repositories using .agents/agents/<name>/agent.md",
+        "retrieved": "2026-09-17",
+        "sample_size": 4,
+        "caveat": "Google's own frontmatter table was never read. Required-ness is third-party."
+      }
+    },
+    "description": {
+      "supported": true,
+      "type": "string",
+      "provenance": {
+        "level": "corpus-derived",
+        "source": "public repositories; dyoshikawa/rulesync schema mirror",
+        "retrieved": "2026-09-17",
+        "sample_size": 4,
+        "caveat": "Reported as required - an agent without one is refused - but that is a third-party claim."
+      }
+    },
+    "tools": {
+      "supported": true,
+      "type": "list",
+      "semantics": "An allowlist. Presence in the list is what grants a capability, including the capability to delegate. There is no denylist on this host, and no read-only flag: a read-only agent is one whose list omits the write tools.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+        "retrieved": "2026-09-17",
+        "quote": "agents that list `invoke_subagent` in their tools now receive the roster of available subagents and usage instructions in their system prompt, so they can actually delegate to the subagents they declared",
+        "caveat": "The semantics of an EMPTY list are unsourced - whether tools: [] means no tools or all tools was not established. Do not emit an empty list on this host."
+      }
+    },
+    "model": {
+      "supported": true,
+      "type": "string",
+      "values": ["flash", "pro", "inherit"],
+      "default": "inherit - the parent's model.",
+      "semantics": "The tier the agent runs at when invoked as a subagent.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+        "retrieved": "2026-09-17",
+        "quote": "Added a `model` option to custom agent frontmatter so an agent runs at a chosen model tier (such as `flash` or `pro`) when invoked as a subagent, defaulting to `inherit` (the parent's model)."
+      }
+    },
+    "subagent": {
+      "supported": true,
+      "type": "boolean",
+      "semantics": "Whether this agent may be invoked AS a subagent. Load-bearing: a fix exists for agents declaring subagent:false still appearing in the roster, which establishes that the field gates roster membership.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+        "retrieved": "2026-09-17",
+        "quote": "Fixed custom agents that declare `subagent: false` still appearing in the available-subagents list and being invocable as subagents."
+      }
+    },
+    "mainAgent": {
+      "supported": true,
+      "type": "boolean",
+      "semantics": "Whether this agent may run as the top-level agent.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+        "retrieved": "2026-09-17",
+        "quote": "Markdown agents support `mainAgent`, `subagent`, `hidden`, `inheritMcp`, and `commandExecutionPolicy` frontmatter fields for fine-grained control over agent behavior."
+      }
+    },
+    "commandExecutionPolicy": {
+      "supported": true,
+      "type": "enum",
+      "values": null,
+      "semantics": "Governs autonomous command execution. 'sandbox' and 'auto' are attested; other values appear only in third-party code and are NOT recorded here as accepted values.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+        "retrieved": "2026-09-17",
+        "quote": "Markdown agents support `mainAgent`, `subagent`, `hidden`, `inheritMcp`, and `commandExecutionPolicy` frontmatter fields for fine-grained control over agent behavior.",
+        "caveat": "The complete enum is unsourced. Third-party code types it as off|sandbox|eager and separate material mentions auto and ask; none of that is first-party, so values is null rather than a guess."
+      }
+    },
+    "hidden": {
+      "supported": true,
+      "type": "boolean",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+        "retrieved": "2026-09-17",
+        "quote": "Markdown agents support `mainAgent`, `subagent`, `hidden`, `inheritMcp`, and `commandExecutionPolicy` frontmatter fields for fine-grained control over agent behavior."
+      }
+    },
+    "agents": {
+      "supported": true,
+      "type": "list",
+      "semantics": "The subagents this agent depends on, by path, using the same resolution rules as skills. Declaring a dependency is separate from being granted the tool that invokes it.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+        "retrieved": "2026-09-17",
+        "quote": "Added an `agents` list to custom agent Markdown frontmatter, letting an agent declare the subagents it depends on using the same workspace-relative, absolute, and agent-relative path rules as `skills`."
+      }
+    },
+    "inheritCustomizations": {
+      "supported": true,
+      "type": "boolean",
+      "semantics": "One switch deciding whether the agent adopts the operator's skills, rules, plugins, subagents and MCP servers. Supersedes the per-kind flags such as inheritMcp.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+        "retrieved": "2026-09-17",
+        "quote": "a single `inheritCustomizations` switch that decides whether the agent adopts your skills, rules, plugins, subagents and MCP servers, replacing per-kind defaults that silently disagreed with each other",
+        "caveat": "Version skew: inheritMcp predates this and both appear in the changelog. Which wins on a given release is unsourced."
+      }
+    },
+    "excludeDefaultComponents": {
+      "supported": true,
+      "type": "boolean",
+      "semantics": "Opts out of default prompt sections and built-in tools while preserving post-invocation hooks. The closest thing on this host to a minimal-surface agent.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+        "retrieved": "2026-09-17",
+        "quote": "Added support for `excludeDefaultComponents: true` in custom agent Markdown frontmatter, allowing custom agents to opt out of default prompt sections and built-in tools while preserving post-invocation hooks."
+      }
+    },
+    "read_only_flag": {
+      "supported": false,
+      "semantics": "No read-only boolean exists on this host, unlike Cursor's readonly. Read-only is achieved by omitting write tools from the allowlist.",
+      "provenance": {
+        "level": "unsourced",
+        "caveat": "Absence across the full 107KB changelog and all reachable material. Not a documented 'there is no such flag'."
+      }
+    }
+  },
+  "delegation": {
+    "supported": true,
+    "mechanism": "The invoke_subagent tool present in the agent's tools allowlist. Invocation takes an array, so one call dispatches several concurrently, and a Workspace mode of inherit, branch or share selects worktree isolation PER INVOCATION rather than in the definition.",
+    "nested": {
+      "supported": true,
+      "gate": "invoke_subagent present in the dispatched agent's own tools allowlist - the same shape as Claude Code's Agent grant.",
+      "max_depth": null,
+      "provenance": {
+        "level": "first-party-source",
+        "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+        "retrieved": "2026-09-17",
+        "quote": "Added support for displaying nested subagents (grandchild and deeper) and handling tool confirmation requests across all subagent depths by recursively relaying nested subtrajectory updates to the root conversation.",
+        "caveat": "A 'maximum nesting depth of 10 levels' is widely repeated by search engines citing antigravity.google/docs. It is NOT in the changelog - the word 'depth' occurs exactly once in 107KB, in the quote above, with no number - and those result sets were contaminated by Claude Code articles citing 5. max_depth stays null. A separate 'invocation limit' is referenced first-party but its value is unstated."
+      }
+    },
+    "provenance": {
+      "level": "first-party-source",
+      "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+      "retrieved": "2026-09-17",
+      "quote": "Fixed `invoke_subagent`, `send_message`, `manage_subagents`, `define_subagent`, and `generate_image` rendering with no tool call line at all in collapsed and expanded tool groups",
+      "caveat": "Tool NAMES are first-party. Their parameter schemas are corpus-derived and not recorded here."
+    }
+  },
+  "mailbox": {
+    "supported": true,
+    "mechanism": "send_message addressed by conversation id, with queued when-idle delivery: an idle agent is woken when a message arrives. This host supplies natively what other hosts need a portable envelope for.",
+    "provenance": {
+      "level": "first-party-source",
+      "source": "https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md",
+      "retrieved": "2026-09-17",
+      "quote": "left queued when-idle messages undelivered until restart",
+      "caveat": "The quote is from a bug fix, so it attests that a queue EXISTS rather than describing its contract. send_message's parameters are corpus-derived. Treat the mechanism as present and its interface as unsourced."
+    }
+  },
+  "notes": [
+    "antigravity.google is blocked by this environment's egress proxy. Everything first-party here came from the official google-antigravity/antigravity-cli repository on GitHub, which is reachable. Quotes were re-verified against a local copy of the changelog rather than accepted from a research summary.",
+    "Antigravity is NOT Gemini CLI. Gemini CLI stores subagents in ~/.gemini/agents and the formats are reported incompatible; the shared ~/.gemini prefix is lineage, not compatibility. No ADK or Gemini Code Assist material is included.",
+    "agent.json is legacy: definitions were migrated from JSON to Markdown at 1.0.16 and dynamic ones at 1.1.6. Any tutorial showing agent.json predates that."
+  ]
+}

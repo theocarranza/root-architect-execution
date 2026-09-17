@@ -27,6 +27,7 @@ import render_agents  # noqa: E402
 import install_codex  # noqa: E402
 import build_adapter  # noqa: E402
 import smoke_install  # noqa: E402
+import validate_interfaces  # noqa: E402
 
 
 @contextlib.contextmanager
@@ -1926,6 +1927,158 @@ class WorkerGitGuardTests(unittest.TestCase):
                               "stderr:\n%s" % (result.returncode, result.stderr))
                 self.assertEqual(result.returncode, expected)
                 self.assertNotIn("Traceback", result.stderr)
+
+
+class AgentInterfaceTests(unittest.TestCase):
+    """The interface gate, and proof that it is load-bearing.
+
+    Every assertion here is written so that reverting the behaviour it guards
+    makes it fail. A test that passes whether or not the gate works would be
+    worse than no test, because it would certify the gate.
+    """
+
+    def setUp(self):
+        self.scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.scratch, ignore_errors=True)
+
+    def run_gate(self, root=None):
+        return subprocess.run(
+            [sys.executable, str((root or ROOT) / "scripts/validate_interfaces.py")],
+            capture_output=True, text=True, cwd=str(root or ROOT))
+
+    def sandbox(self):
+        """A throwaway copy of the repository, for mutation."""
+        dest = self.scratch / "tree"
+        shutil.copytree(ROOT, dest, ignore=shutil.ignore_patterns(
+            ".git", "__pycache__", "*.pyc", "dist"))
+        return dest
+
+    def interfaces(self):
+        return sorted((ROOT / "adapters").glob("*/agent-interface.json"))
+
+    def test_every_interface_is_schema_conformant_and_self_consistent(self):
+        validator = Validator(ROOT / "schemas/agent-interface.schema.json")
+        for path in self.interfaces():
+            with self.subTest(host=path.parent.name):
+                document = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(validator.validate(document), [])
+                self.assertEqual(
+                    document["host"], path.parent.name,
+                    "an interface must not describe a host it is not filed under")
+
+    def test_the_gate_passes_on_the_repository_as_it_stands(self):
+        result = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_first_party_claims_carry_a_verbatim_quote(self):
+        """A paraphrase is where inference re-enters."""
+        for path in self.interfaces():
+            document = json.loads(path.read_text(encoding="utf-8"))
+            for trail, prov in validate_interfaces.walk_provenance(document, []):
+                level = prov.get("level")
+                if level in ("first-party-doc", "first-party-source"):
+                    with self.subTest(host=document["host"], at=".".join(trail)):
+                        self.assertTrue(
+                            (prov.get("quote") or "").strip(),
+                            "a first-party claim without the source's own words "
+                            "is a claim nobody can re-check")
+
+    def test_unsourced_claims_bear_no_weight(self):
+        """`unsourced` must never carry evidence filed under the wrong level."""
+        for path in self.interfaces():
+            document = json.loads(path.read_text(encoding="utf-8"))
+            for trail, prov in validate_interfaces.walk_provenance(document, []):
+                if prov.get("level") == "unsourced":
+                    with self.subTest(host=document["host"], at=".".join(trail)):
+                        self.assertIsNone(prov.get("quote"))
+                        self.assertIsNone(prov.get("source"))
+                        self.assertTrue(
+                            (prov.get("caveat") or "").strip(),
+                            "an unsourced claim with no caveat cannot be told "
+                            "apart from one nobody checked")
+
+    def test_corpus_derived_claims_state_their_sample_size(self):
+        for path in self.interfaces():
+            document = json.loads(path.read_text(encoding="utf-8"))
+            for trail, prov in validate_interfaces.walk_provenance(document, []):
+                if prov.get("level") == "corpus-derived":
+                    with self.subTest(host=document["host"], at=".".join(trail)):
+                        self.assertIsInstance(prov.get("sample_size"), int)
+
+    # --- mutation: each of these must FAIL the gate -----------------------
+
+    def test_gate_rejects_a_role_depending_on_unsourced_nesting(self):
+        """The finding this whole gate exists for.
+
+        Cursor's nested delegation is unsourced. A role that requires nesting
+        must be refused there rather than rendered as a guarantee.
+        """
+        tree = self.sandbox()
+        role = tree / "roles/impl-executor.json"
+        document = json.loads(role.read_text(encoding="utf-8"))
+        document["tools"]["allow"].append("delegate")
+        document["tools"]["deny"] = [d for d in document["tools"]["deny"]
+                                     if d != "delegate"]
+        document["must_not"] = [m for m in document["must_not"]
+                                if m != "spawn-agents"]
+        role.write_text(json.dumps(document, indent=2), encoding="utf-8")
+
+        result = self.run_gate(tree)
+        self.assertEqual(result.returncode, 1,
+                         "a role requiring nested delegation passed against a "
+                         "host where nesting is UNSOURCED")
+        self.assertIn("UNSOURCED", result.stderr)
+
+    def test_gate_rejects_drift_between_interface_and_host_manifest(self):
+        """The renderer trusts the manifest; the interface describes the host.
+
+        When they disagree, a generated agent can claim a guarantee the host
+        will not keep - so disagreement must not be silent.
+        """
+        tree = self.sandbox()
+        path = tree / "adapters/claude-code/agent-interface.json"
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["fields"]["tools"]["supported"] = False
+        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+
+        result = self.run_gate(tree)
+        self.assertEqual(result.returncode, 1,
+                         "the interface contradicted hosts/claude-code.json and "
+                         "the gate allowed it")
+        self.assertIn("drift", result.stderr)
+
+    def test_gate_rejects_a_first_party_claim_with_no_quote(self):
+        tree = self.sandbox()
+        path = tree / "adapters/claude-code/agent-interface.json"
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["delegation"]["nested"]["provenance"].pop("quote")
+        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+
+        result = self.run_gate(tree)
+        self.assertEqual(result.returncode, 1,
+                         "a first-party claim lost its quote and the gate "
+                         "still called the interface sound")
+
+    def test_gate_rejects_evidence_filed_under_unsourced(self):
+        """An unsourced level carrying a source means the level is wrong."""
+        tree = self.sandbox()
+        path = tree / "adapters/cursor/agent-interface.json"
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["delegation"]["nested"]["provenance"]["source"] = "https://example.invalid"
+        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+
+        result = self.run_gate(tree)
+        self.assertEqual(result.returncode, 1)
+
+    def test_gate_reports_rather_than_crashes_on_malformed_json(self):
+        """The error path must not error - this repository keeps closing that."""
+        tree = self.sandbox()
+        (tree / "adapters/cursor/agent-interface.json").write_text(
+            "{ not json", encoding="utf-8")
+
+        result = self.run_gate(tree)
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":

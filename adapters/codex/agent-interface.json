@@ -1,0 +1,149 @@
+{
+  "host": "codex",
+  "retrieved": "2026-09-17",
+  "definition": {
+    "format": "toml",
+    "locations": [
+      "$CODEX_HOME/agents/<name>.toml",
+      ".codex/agents/<name>.toml",
+      "config.toml [agents.<name>]"
+    ],
+    "provenance": {
+      "level": "first-party-source",
+      "source": "openai/codex@f3da386 codex-rs/config/src/config_toml.rs and codex-rs/core/src/config/config_tests.rs",
+      "retrieved": "2026-09-17",
+      "quote": "[agents.researcher]\ndescription = \"Research-focused role.\"\nconfig_file = \"./agents/researcher.toml\"\nnickname_candidates = [\"Herodotus\", \"Ibn Battuta\"]",
+      "caveat": "Read from the vendor's source and its tests, not from prose documentation: docs/config.md in that repository is a six-line stub redirecting to developers.openai.com, which is blocked by this environment's egress proxy."
+    }
+  },
+  "fields": {
+    "description": {
+      "supported": true,
+      "type": "string",
+      "semantics": "Human-facing role documentation used in spawn tool guidance. Required unless supplied by the referenced role file.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "openai/codex@f3da386 codex-rs/config/src/config_toml.rs AgentRoleToml",
+        "retrieved": "2026-09-17",
+        "quote": "Human-facing role documentation used in spawn tool guidance. Required unless supplied by the referenced agent role file."
+      }
+    },
+    "config_file": {
+      "supported": true,
+      "type": "string",
+      "semantics": "Path to a role-specific config LAYER. This is the load-bearing field on this host: the referenced file flattens an entire ConfigToml, so a role overrides any config key - model, developer_instructions, and critically sandbox_mode and the [permissions] profile. Capability restriction here happens below the agent layer, in the OS sandbox, where an injected instruction cannot reach it. Relative paths resolve against the config.toml that defines them.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "openai/codex@f3da386 codex-rs/config/src/config_toml.rs AgentRoleToml and codex-rs/agent-roles/src/agent_role_config.rs RawAgentRoleFileToml",
+        "retrieved": "2026-09-17",
+        "quote": "Path to a role-specific config layer.\n    /// Relative paths are resolved relative to the `config.toml` that defines them."
+      }
+    },
+    "nickname_candidates": {
+      "supported": true,
+      "type": "list",
+      "semantics": "Candidate nicknames for agents spawned with this role.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "openai/codex@f3da386 codex-rs/config/src/config_toml.rs AgentRoleToml",
+        "retrieved": "2026-09-17",
+        "quote": "Candidate nicknames for agents spawned with this role."
+      }
+    },
+    "name": {
+      "supported": true,
+      "type": "string",
+      "semantics": "Set inside the role file rather than the config.toml stanza, where the stanza key already names the role.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "openai/codex@f3da386 codex-rs/agent-roles/src/agent_role_config.rs RawAgentRoleFileToml",
+        "retrieved": "2026-09-17",
+        "quote": "struct RawAgentRoleFileToml {\n    name: Option<String>,"
+      }
+    },
+    "default_subagent_model": {
+      "supported": true,
+      "type": "string",
+      "semantics": "Top-level, not per-role: the model for spawned subagents when the spawn call does not select one.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "openai/codex@f3da386 codex-rs/config/src/config_toml.rs",
+        "retrieved": "2026-09-17",
+        "quote": "Default model for spawned subagents when the spawn call does not select one."
+      }
+    },
+    "default_subagent_reasoning_effort": {
+      "supported": true,
+      "type": "string",
+      "semantics": "Top-level, not per-role: reasoning effort for spawned subagents when the spawn call does not select one.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "openai/codex@f3da386 codex-rs/config/src/config_toml.rs",
+        "retrieved": "2026-09-17",
+        "quote": "Default reasoning effort for spawned subagents when the spawn call does not select one."
+      }
+    },
+    "tool_allowlist": {
+      "supported": false,
+      "semantics": "No per-role tool allowlist field was found. Tool gating on this host appears to work at namespace granularity through excluded_tool_namespaces and direct_only_tool_namespaces, and capability restriction proper is the sandbox profile reached through config_file.",
+      "provenance": {
+        "level": "unsourced",
+        "caveat": "excluded_tool_namespaces and direct_only_tool_namespaces exist in codex-rs/core/src/config/mod.rs, but whether they are settable per role through the config layer was not established. Do not build a role grant against this until it is."
+      }
+    },
+    "tool_denylist": {
+      "supported": false,
+      "semantics": "No per-role tool denylist field was found. The nearest construct is excluded_tool_namespaces, which excludes at namespace rather than tool granularity and was not established as settable per role.",
+      "provenance": {
+        "level": "unsourced",
+        "caveat": "Searched codex-rs/config and codex-rs/core/src/config for a per-role denial key and found none. Recorded explicitly so that absence is not mistaken for nobody having looked."
+      }
+    },
+    "read_only_flag": {
+      "supported": true,
+      "type": "enum",
+      "semantics": "Not a frontmatter boolean but a sandbox mode set through the role's config layer. SandboxMode::ReadOnly is a real enforced state on this host.",
+      "provenance": {
+        "level": "first-party-source",
+        "source": "openai/codex@f3da386 codex-rs/config/src/config_toml.rs derive_permission_profile",
+        "retrieved": "2026-09-17",
+        "quote": "SandboxMode::ReadOnly",
+        "caveat": "Its reachability specifically FROM a role config layer follows from config_file flattening ConfigToml; that inference is one step and is flagged as such."
+      }
+    }
+  },
+  "delegation": {
+    "supported": true,
+    "mechanism": "Spawning is a first-class runtime concept with tracked thread depth rather than a tool named in a per-agent allowlist.",
+    "nested": {
+      "supported": true,
+      "gate": null,
+      "max_depth": null,
+      "provenance": {
+        "level": "first-party-source",
+        "source": "openai/codex@f3da386 codex-rs/core/src/agent/control_tests.rs and codex-rs/core/src/agent/mod.rs",
+        "retrieved": "2026-09-17",
+        "quote": "use crate::agent::next_thread_spawn_depth;",
+        "caveat": "Established from the existence of next_thread_spawn_depth plus tests exercising depth: 1, depth: 2 and a NestedParent reload route. That is strong evidence the runtime supports and tracks nesting, but no documented statement of the guarantee was read, and no mechanism for GATING nesting per role was found - so gate is null and no role may yet declare that nesting is withheld on this host."
+      }
+    },
+    "provenance": {
+      "level": "first-party-source",
+      "source": "openai/codex@f3da386 codex-rs/core/templates/agents/orchestrator.md",
+      "retrieved": "2026-09-17",
+      "quote": "When you ask sub-agent to do the work for you, your only role becomes to coordinate them. Do not perform the actual work while they are working."
+    }
+  },
+  "mailbox": {
+    "supported": false,
+    "mechanism": null,
+    "provenance": {
+      "level": "unsourced",
+      "caveat": "No inter-agent message primitive was found. SubagentHookContext and subagent start/stop hook schemas exist in codex-rs/hooks, which is a lifecycle surface rather than a mailbox."
+    }
+  },
+  "notes": [
+    "This host's isolation model is the strongest of the four sourced here, and the least like the others: a role carries a config LAYER, so restriction is an OS sandbox profile rather than a tool list. A portable role vocabulary that only knows about tool allowlists will express this host badly.",
+    "Codex ships its own orchestrator prompt stating the coordinate-do-not-work discipline this project arrived at independently."
+  ]
+}

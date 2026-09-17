@@ -1,0 +1,124 @@
+{
+  "host": "cursor",
+  "retrieved": "2026-09-17",
+  "definition": {
+    "format": "markdown-yaml",
+    "locations": ["<plugin>/agents/<name>.md"],
+    "provenance": {
+      "level": "first-party-source",
+      "source": "cursor/plugins@e31650e schemas/plugin.schema.json",
+      "retrieved": "2026-09-17",
+      "quote": "\"agents\": {\n   \"$ref\": \"#/$defs/stringOrStringArray\",\n   \"description\": \"Glob pattern(s) or path(s) to agent definition files.\"\n  }",
+      "caveat": "The manifest schema is first-party and establishes that agents are files referenced by glob. It says nothing about their frontmatter, which is why every field below is corpus-derived."
+    }
+  },
+  "fields": {
+    "name": {
+      "supported": true,
+      "type": "string",
+      "provenance": {
+        "level": "corpus-derived",
+        "source": "cursor/plugins@e31650e - every agent file under */agents/*.md",
+        "retrieved": "2026-09-17",
+        "sample_size": 13,
+        "caveat": "Present in 13 of 13."
+      }
+    },
+    "description": {
+      "supported": true,
+      "type": "string",
+      "provenance": {
+        "level": "corpus-derived",
+        "source": "cursor/plugins@e31650e - every agent file under */agents/*.md",
+        "retrieved": "2026-09-17",
+        "sample_size": 13,
+        "caveat": "Present in 13 of 13."
+      }
+    },
+    "model": {
+      "supported": true,
+      "type": "string",
+      "semantics": "Observed values include a tier alias, 'inherit', and a model id carrying reasoning effort as an inline suffix - grok-4.6[effort=xhigh]. Effort is therefore part of the model string on this host rather than a separate key.",
+      "provenance": {
+        "level": "corpus-derived",
+        "source": "cursor/plugins@e31650e - */agents/*.md",
+        "retrieved": "2026-09-17",
+        "sample_size": 8,
+        "caveat": "Observed in 8 of 13 files. The accepted value set is unsourced; these are values in use, not a documented enum."
+      }
+    },
+    "readonly": {
+      "supported": true,
+      "type": "boolean",
+      "semantics": "This host's read-only mechanism. Where Claude Code omits write tools from an allowlist, Cursor sets one boolean. Set by Cursor's own review-oriented plugins - agent-compatibility's four review agents, advisor, and create-plugin's architect.",
+      "provenance": {
+        "level": "corpus-derived",
+        "source": "cursor/plugins@e31650e - */agents/*.md",
+        "retrieved": "2026-09-17",
+        "sample_size": 6,
+        "caveat": "Observed in 6 of 13 files, always as true. Whether it is enforced by the host or advisory is UNSOURCED - no first-party statement of its semantics was read."
+      }
+    },
+    "is_background": {
+      "supported": true,
+      "type": "boolean",
+      "provenance": {
+        "level": "corpus-derived",
+        "source": "cursor/plugins@e31650e - */agents/*.md",
+        "retrieved": "2026-09-17",
+        "sample_size": 2,
+        "caveat": "Observed in 2 of 13 files."
+      }
+    },
+    "tools": {
+      "supported": false,
+      "semantics": "No tools key appears in any agent file in Cursor's own plugin repository. Capability restriction on this host appears to be the readonly boolean rather than a tool list.",
+      "provenance": {
+        "level": "unsourced",
+        "caveat": "THIS IS THE IMPORTANT CAVEAT IN THIS FILE. A corpus tells you which keys are USED, never which keys are SUPPORTED. Absence from 13 files is not absence from the interface. This project asserted otherwise earlier in the work and was corrected; the enum exists so the mistake is not repeatable. Treat as unknown, not as false."
+      }
+    },
+    "disallowedTools": {
+      "supported": false,
+      "semantics": "No denylist key observed.",
+      "provenance": {
+        "level": "unsourced",
+        "caveat": "Same reasoning as tools: not observed is not unsupported."
+      }
+    }
+  },
+  "delegation": {
+    "supported": true,
+    "mechanism": "SDK custom subagents, declared as an agents map on AgentOptions and spawned by the main agent through an Agent tool. Cloud-only at v1: the local executor silently drops the field.",
+    "nested": {
+      "supported": null,
+      "gate": null,
+      "max_depth": null,
+      "provenance": {
+        "level": "unsourced",
+        "caveat": "THE BLOCKING GAP FOR THIS HOST. The SDK reference describes only main-agent-to-subagent dispatch and never states whether a subagent may dispatch in turn. Its guidance actively discourages the shape: 'Deeply nested agents calling agents calling agents chains. One level of sub-agents is almost always enough; beyond that you usually want a different architecture.' That is counsel, not a capability statement, and must not be read as either a yes or a no. cursor.com is blocked by this environment's egress proxy, so the prose documentation could not be read. Until sourced, no role requiring nested delegation may target this host."
+      }
+    },
+    "provenance": {
+      "level": "first-party-source",
+      "source": "cursor/plugins@e31650e cursor-sdk/skills/cursor-sdk/references/advanced.md",
+      "retrieved": "2026-09-17",
+      "quote": "Sub-agents are **cloud-only at v1**. The `agents:` field on `AgentOptions` is wired through `customSubagents` on the cloud create call; the local executor silently drops it. If you pass `agents` alongside `local: { ... }`, nothing happens.",
+      "caveat": "Note this describes the SDK surface, which is a DIFFERENT surface from the plugin agent files the fields above describe. Whether the two are the same agent system is unsourced."
+    }
+  },
+  "mailbox": {
+    "supported": false,
+    "mechanism": null,
+    "provenance": {
+      "level": "unsourced",
+      "caveat": "Cursor's own orchestrate plugin moves information between nodes as files - handoffs/<task-name>.md written by the dispatching script - which is a convention built ON the host, not a host primitive. Recorded as unsourced rather than false."
+    }
+  },
+  "notes": [
+    "cursor.com is blocked by this environment's egress proxy. Everything here came from Cursor's public plugin repository on GitHub. No prose documentation was read, which is why this file carries more corpus-derived and unsourced entries than any other.",
+    "Two distinct agent surfaces appear in Cursor's material and are not reconciled here: plugin agent files with the frontmatter above, and SDK custom subagents defined as objects with description, prompt and model. They may or may not be the same system.",
+    "Upstream Thermos declares only name and description - no readonly - while Cursor's own review plugins set readonly: true. Against Cursor's house convention that is an upstream omission, which is the correct framing of a gap this project previously described in Claude Code's vocabulary.",
+    "Cursor's orchestrate plugin is prior art for the topology in ADR 0003, including the rule that a planner publishes tasks and does no coding, and that a worker that dies without a handoff gets a synthetic one so silence never reads as success."
+  ]
+}
