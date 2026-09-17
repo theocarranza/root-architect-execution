@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://root-architect-execution/schemas/job-queue.schema.json",
+  "title": "Job queue",
+  "description": "The ordered work of one run, at <workspace>/.root-architect/queue/<run_id>.json. This is the deterministic half of the orchestrator: ordering, state and bookkeeping live here so that the agent's attention goes to judging what came back. It is NOT a second record of the work - the envelopes are that, and the queue points at them so every claim here can be checked against the mailbox rather than believed.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "created_at", "tasks"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9]{8}-[a-z0-9-]+$",
+      "description": "Matches the dispatch state's run id, so a queue and the dispatches it produced can be reconciled."
+    },
+    "created_at": { "type": "string", "minLength": 1 },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/task" },
+      "description": "In the order they are to be dispatched. Order is the queue's whole contribution to sequencing: there is no priority field and no scheduler, because a run that needs one has outgrown what root should be handing to a single orchestrator."
+    }
+  },
+  "$defs": {
+    "task": {
+      "type": "object",
+      "required": ["name", "worker", "brief", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Unique within the run. Feeds envelope filenames and log lines, so it stays shell- and path-safe."
+        },
+        "worker": {
+          "type": "string",
+          "pattern": "^worker:[a-z][a-z0-9-]*$",
+          "description": "Which role this task is for. The orchestrator dispatches it; the queue only records the intent."
+        },
+        "brief": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to the brief this task dispatches, relative to the workspace."
+        },
+        "state": {
+          "type": "string",
+          "enum": ["pending", "dispatched", "returned", "failed"],
+          "description": "Transitions are monotonic: pending -> dispatched -> returned or failed, and never backwards. A run that could move a task back to pending could rewrite its own history into agreement with a later story, which is the same reason envelopes are append-only."
+        },
+        "envelope": {
+          "type": "string",
+          "description": "The envelope that answered this task. Required once the state is returned or failed: a task recorded as answered with nothing to point at is a claim rather than a record, and verify refuses it."
+        },
+        "updated_at": { "type": "string" }
+      }
+    }
+  }
+}
