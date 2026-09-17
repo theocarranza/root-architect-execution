@@ -29,6 +29,7 @@ import build_adapter  # noqa: E402
 import smoke_install  # noqa: E402
 import validate_interfaces  # noqa: E402
 import mailbox  # noqa: E402
+import job_queue  # noqa: E402
 
 
 @contextlib.contextmanager
@@ -2206,6 +2207,140 @@ class MailboxTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/mailbox.py"),
              "--workspace", str(self.workspace), "verify", "--run-id", "r1"],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+
+
+class JobQueueTests(unittest.TestCase):
+    """The deterministic half of the orchestrator, and its agreement with the
+    mailbox.
+
+    The queue and the mailbox are two records of the same run. Two records that
+    can drift are worth less than one unless something compares them, so the
+    cross-check gets as much attention here as the state machine.
+    """
+
+    RUN = "20260917-demo"
+
+    def setUp(self):
+        self.workspace = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.workspace, ignore_errors=True)
+        self.ws = str(self.workspace)
+
+    def seed(self, tasks=None):
+        tasks = tasks or [
+            {"name": "build-parser", "worker": "worker:implementer",
+             "brief": "briefs/parser.json"},
+            {"name": "check-plan", "worker": "worker:spec-validator",
+             "brief": "briefs/parser.json"},
+        ]
+        return job_queue.init(self.ws, self.RUN, tasks)
+
+    def answer(self, name="build-parser"):
+        """Dispatch a task and post the envelope that answers it."""
+        job_queue.mark(self.ws, self.RUN, name, "dispatched")
+        path = mailbox.post(self.ws, self.RUN, "report", "worker:implementer",
+                            "orchestrator", "orchestrator", b"done\n")
+        job_queue.mark(self.ws, self.RUN, name, "returned", path.name)
+        return path
+
+    # --- the state machine ------------------------------------------------
+
+    def test_transitions_are_monotonic(self):
+        """A queue that can move backwards can revise its own history."""
+        self.seed()
+        self.answer()
+        for backwards in ("dispatched", "returned"):
+            with self.subTest(to=backwards):
+                with self.assertRaises(job_queue.JobQueueError) as caught:
+                    job_queue.mark(self.ws, self.RUN, "build-parser", backwards,
+                                   "whatever.md")
+                self.assertIn("monotonic", str(caught.exception))
+
+    def test_an_answered_task_must_name_its_envelope(self):
+        self.seed()
+        job_queue.mark(self.ws, self.RUN, "build-parser", "dispatched")
+        for state in ("returned", "failed"):
+            with self.subTest(state=state):
+                with self.assertRaises(job_queue.JobQueueError) as caught:
+                    job_queue.mark(self.ws, self.RUN, "build-parser", state)
+                # mark()'s own wording, not just any mention of an envelope:
+                # validate() refuses this on save as well, so an assertion on
+                # the word alone passed whether or not mark() checked at all.
+                self.assertIn("needs the envelope that answered it",
+                              str(caught.exception))
+
+    def test_only_one_task_is_out_at_a_time(self):
+        """dispatch_state reads one open dispatch; two would blind the guard."""
+        self.seed()
+        job_queue.mark(self.ws, self.RUN, "build-parser", "dispatched")
+        with self.assertRaises(job_queue.JobQueueError) as caught:
+            job_queue.next_task(job_queue.load(self.ws, self.RUN))
+        self.assertIn("still dispatched", str(caught.exception))
+
+    def test_next_returns_tasks_in_order_then_nothing(self):
+        self.seed()
+        self.assertEqual(
+            job_queue.next_task(job_queue.load(self.ws, self.RUN))["name"],
+            "build-parser")
+        self.answer("build-parser")
+        self.assertEqual(
+            job_queue.next_task(job_queue.load(self.ws, self.RUN))["name"],
+            "check-plan")
+        self.answer("check-plan")
+        self.assertIsNone(job_queue.next_task(job_queue.load(self.ws, self.RUN)))
+
+    def test_a_run_is_queued_once(self):
+        """Re-initialising would discard what the earlier queue recorded."""
+        self.seed()
+        with self.assertRaises(job_queue.JobQueueError) as caught:
+            self.seed()
+        self.assertIn("already exists", str(caught.exception))
+
+    def test_duplicate_task_names_are_refused(self):
+        twice = [
+            {"name": "same", "worker": "worker:implementer", "brief": "b.json"},
+            {"name": "same", "worker": "worker:spec-validator", "brief": "b.json"},
+        ]
+        with self.assertRaises(job_queue.JobQueueError) as caught:
+            job_queue.init(self.ws, self.RUN, twice)
+        self.assertIn("twice", str(caught.exception))
+
+    # --- agreement with the mailbox ---------------------------------------
+
+    def test_a_sound_run_verifies(self):
+        self.seed()
+        self.answer()
+        self.assertEqual(job_queue.verify(self.ws, self.RUN), [])
+
+    def test_an_envelope_the_mailbox_does_not_have_is_caught(self):
+        """The queue must not record work the record of the work lacks."""
+        self.seed()
+        job_queue.mark(self.ws, self.RUN, "build-parser", "dispatched")
+        job_queue.mark(self.ws, self.RUN, "build-parser", "returned",
+                       "0002-report-worker-implementer.md")
+
+        problems = job_queue.verify(self.ws, self.RUN)
+        self.assertTrue(any("not in the mailbox" in p for p in problems),
+                        "a queue citing a missing envelope verified clean: %s" % problems)
+
+    def test_an_unanswered_task_pointing_at_an_answer_is_caught(self):
+        """Bookkeeping that would read as progress."""
+        self.seed()
+        path = job_queue.queue_path(self.ws, self.RUN)
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["tasks"][0]["envelope"] = "0001-task-orchestrator.md"
+        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+
+        problems = job_queue.verify(self.ws, self.RUN)
+        self.assertTrue(any("already names an envelope" in p for p in problems),
+                        "a pending task citing an answer verified clean: %s" % problems)
+
+    def test_a_missing_queue_is_reported_not_raised_as_a_traceback(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/job_queue.py"),
+             "--workspace", self.ws, "verify", "--run-id", self.RUN],
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
