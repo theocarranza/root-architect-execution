@@ -86,6 +86,36 @@ marketplace while you work on it. Two things still bite:
   and the marketplace entry is silently ignored, so drift is invisible until
   something installs the wrong thing. `claude plugin validate .` catches it.
 
+## Install prerequisite: the nesting cap
+
+Orchestration needs two levels of agent nesting — root dispatches the
+orchestrator, the orchestrator dispatches workers. Claude Code caps nesting at
+`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, and at the cap the `Agent` tool is
+withheld from the dispatched agent's toolset **entirely**, rather than offered
+and refused. So an orchestrator at the cap does not fail loudly; it simply has
+no way to dispatch.
+
+```bash
+export CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2
+```
+
+Two things worth knowing about that variable:
+
+- **It is read at process start.** Exporting it into a session already running
+  does nothing. Set it before launching.
+- **Its default is not a release constant.** Absent an explicit setting the
+  value comes from a remotely-controlled feature flag, so it can differ between
+  a local session and a web one, and can change with no local change at all.
+  Measured at `1` in a Claude Code web session on 2026-09-17.
+
+Verified rather than assumed, by an A/B probe of two fresh `claude -p`
+processes differing only in that variable: at `2` the dispatched subagent holds
+`Agent`, at `1` it does not.
+
+You do not have to remember this. Root checks the capability at startup and
+refuses to orchestrate without it, so a missing prerequisite stops the run with
+a reason instead of quietly producing an unisolated one.
+
 ## Layout
 
 | Path | What it is |

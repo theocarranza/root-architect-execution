@@ -21,8 +21,10 @@ Sequencing status, against the five phases below:
 2. Role dependence checked against sourced capability — **done** (this change).
 3. The root agent as a main-thread agent — **research done 2026-09-17**,
    build not started. The research replaced the decision it was meant to
-   confirm: see D11, and the depth-cap risk that now blocks Phase 4.
-4. Orchestrator, workers, mailbox — **not started**.
+   confirm (see D11) and surfaced the nesting cap, resolved as D12.
+4. Orchestrator, workers, mailbox — **not started**, unblocked 2026-09-17 by
+   D12 (the nesting cap is raised to 2 as an install prerequisite, verified by
+   A/B probe before adoption).
 5. `thermos-claude` disposition — **done**: PR #1 closed unmerged, 2026-09-17.
 
 ## Context
@@ -135,7 +137,7 @@ Sourced 2026-09-17. Nested delegation, which is D2's gate:
 
 | Host | Nested | Gate | Provenance |
 |---|---|---|---|
-| claude-code | yes | `Agent` in the dispatched agent's own allowlist | first-party doc |
+| claude-code | yes | `Agent` in the allowlist **and** the nesting cap raised — see D12 | empirically verified |
 | antigravity | yes | `invoke_subagent` in the dispatched agent's own allowlist | first-party changelog |
 | codex | yes | none found | first-party source |
 | cursor | **unknown** | — | **unsourced** |
@@ -166,21 +168,34 @@ the new gate was corrected during implementation for rejecting it.
 
 ## Risks
 
-**The topology does not run in the environment it was designed in.** Measured
-2026-09-17: `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`, and a dispatched
-subagent asking for the `Agent` tool is told *"No such tool available: Agent.
-Agent is disabled for this session, in subagents as well as here."* An
-orchestrator is a subagent. At depth 1 it cannot dispatch workers, so
-root → orchestrator → workers collapses to root → orchestrator, and the
-orchestrator has nobody to orchestrate.
+**The topology needs a raised nesting cap, and that is now an install
+prerequisite.** Measured 2026-09-17: at the default
+`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`, a dispatched subagent asking for the
+`Agent` tool is told *"No such tool available: Agent. Agent is disabled for
+this session, in subagents as well as here."* An orchestrator is a subagent, so
+at depth 1 it cannot dispatch workers and root → orchestrator → workers
+collapses.
 
-This is the largest open risk in the ADR and it is not resolved by any decision
-above. Three ways out, none yet chosen: raise the cap through the environment
-variable and make that a documented install prerequisite; run workers as
-separate sessions rather than nested subagents; or accept two levels and let
-root dispatch workers directly, which abandons D3's isolation. The first is
-cheapest and the most fragile — it depends on an operator setting a variable
-whose default is controlled remotely.
+**D12 — The cap is raised to 2 as a documented install prerequisite.** Chosen
+by the operator over the two alternatives (workers as separate processes
+driven by D7's dispatch script; or two levels with root dispatching directly,
+abandoning D3). Verified before adoption rather than after, by an A/B probe of
+two fresh `claude -p` processes differing only in that variable: at 2 the
+dispatched subagent holds `Agent`; at 1 it does not. The variable is read at
+process start, so exporting it into a running session does nothing.
+
+What makes this acceptable despite resting on an environment variable is D11.
+Root checks the capability at startup and refuses to orchestrate without it, so
+an unset prerequisite stops the run with a reason rather than silently
+producing an unisolated one. A fragile prerequisite that announces itself is a
+different risk from one that degrades quietly.
+
+What it does not fix: the variable's default remains a remotely-controlled
+feature value. An environment where the operator cannot set variables at all
+has no path under D12, and the fallback there is the dispatch-script route,
+which the envelope protocol is deliberately independent of — the mailbox
+format, D5, D6 and D9 hold whichever way workers are launched, so that
+migration would rewrite dispatch and leave the protocol intact.
 
 **A remotely-defaulted cap cannot be declared once.** Because the default is a
 feature value rather than a release constant, an interface file recording

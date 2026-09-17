@@ -241,14 +241,14 @@
     "mechanism": "The Agent tool present in the agent's tools allowlist.",
     "nested": {
       "supported": true,
-      "gate": "Agent present in the dispatched agent's own tools allowlist - AND the runtime nesting cap being high enough to reach that depth. The allowlist is necessary, not sufficient.",
-      "max_depth": 1,
+      "gate": "Two conditions, both necessary. (1) Agent present in the dispatched agent's own tools allowlist. (2) CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH high enough to reach that depth - at the cap the Agent tool is withheld from the subagent's toolset entirely rather than offered and refused.",
+      "max_depth": null,
       "provenance": {
         "level": "empirically-verified",
-        "source": "probe run 2026-09-17 in this session: a dispatched general-purpose subagent was asked to call the Agent tool",
+        "source": "A/B probe, 2026-09-17: two fresh `claude -p` processes differing only in CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, each asked to dispatch a subagent that reports whether it holds the Agent tool",
         "retrieved": "2026-09-17",
-        "quote": "Error: No such tool available: Agent. Agent is disabled for this session, in subagents as well as here.",
-        "caveat": "DOCUMENTATION AND REALITY DISAGREE, AND REALITY IS NARROWER. The sub-agent reference implies nesting is available whenever Agent is granted ('If Agent is omitted entirely, the subagent cannot spawn any subagents'). Empirically the depth is capped by CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, observed as 1 in this environment, and at the cap the Agent tool is withheld from the subagent's toolset entirely rather than offered and refused. The installed binary carries the refusal for the other path - 'Subagent nesting limit reached (depth ...). Complete this task directly using your tools instead of spawning another agent. If the user explicitly requested deeper nesting, ask them to raise CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH' - under the ids subagent_depth_cap and depth_limit. The cap's DEFAULT is a remotely-controlled feature value (maxSubagentSpawnDepthFromGrowthBook, integer >= 1), so it is neither a static host property nor under this project's control, and may differ per environment or change with no local change at all. max_depth: 1 records what was measured here, not a host constant."
+        "quote": "cap=2 -> HAVE_AGENT; cap=1 -> NO_AGENT",
+        "caveat": "Nesting works and the environment variable is what controls it - both directions measured, not inferred from one. But the variable's DEFAULT is a remotely-controlled feature value (maxSubagentSpawnDepthFromGrowthBook, integer >= 1), so absent an explicit setting this capability is not under local control and can change with no local change at all. The value must be read at process start: exporting it into a running session does nothing, which is why the probe launched fresh processes. max_depth is null because there is no host constant to record - only whatever the environment is currently configured to allow."
       }
     },
     "provenance": {
