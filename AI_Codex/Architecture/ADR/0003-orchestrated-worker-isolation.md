@@ -19,8 +19,9 @@ Sequencing status, against the five phases below:
 0. Branch reset after PR #2 merged — **done**.
 1. Interface files and their gate — **done** (this change).
 2. Role dependence checked against sourced capability — **done** (this change).
-3. The root agent as a main-thread agent — **not started**, and blocked on an
-   unsourced prerequisite recorded under Risks.
+3. The root agent as a main-thread agent — **research done 2026-09-17**,
+   build not started. The research replaced the decision it was meant to
+   confirm: see D11, and the depth-cap risk that now blocks Phase 4.
 4. Orchestrator, workers, mailbox — **not started**.
 5. `thermos-claude` disposition — **done**: PR #1 closed unmerged, 2026-09-17.
 
@@ -63,6 +64,15 @@ by the operator. The enum exists so that mistake is unrepresentable.
 restriction. A host supports this architecture iff an agent that was itself
 dispatched can dispatch in turn.
 
+> **Amended 2026-09-17, after Phase 3 research.** On Claude Code this is not a
+> host capability at all. It is a runtime cap, `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`,
+> whose default comes from a **remotely-controlled feature value**
+> (`maxSubagentSpawnDepthFromGrowthBook`). It can differ between environments
+> and change with no local change whatsoever. Measured at **1** in the
+> environment this was written in, where a dispatched subagent receives no
+> `Agent` tool at all. A capability that can be revoked remotely cannot be
+> declared once and relied on; see Risks.
+
 **D3 — Topology is Operator → Root → Orchestrator → Workers.** Root holds the
 task and the operator channel. It does not dispatch, gather, or synthesize.
 
@@ -98,6 +108,26 @@ The constraint and the protocol stop fighting.
 **D10 — Root ships as a main-thread agent.** Full consequences, including what
 this means for the product rather than the configuration, are recorded in
 [[Root as a Main-Thread Agent]].
+
+**D11 — The fail-closed check asks about capability, not identity.** Phase 3
+set out to find a way for root to answer *"am I the main thread?"*. It cannot:
+a dispatched subagent's environment is byte-identical to its parent's, all 49
+`CLAUDE_*` variables included, and the host tracks `agentDepth` internally
+without surfacing it.
+
+The question was the wrong one. What root needs to know is not its identity but
+whether the guarantee it is about to claim actually holds — and **that is
+observable**. An agent can see its own toolset. So root checks, at startup,
+that `Agent` is present and that the only dispatchable type is the
+orchestrator. If `Agent` is missing, the depth cap or the launch mode has
+already taken it away. If other types are reachable, `Agent(orchestrator)` did
+not bind. Either way the boundary is not in force, and root refuses to
+orchestrate.
+
+This is weaker than a host guarantee: it relies on the agent reading its own
+context honestly rather than on the runtime refusing. It is nonetheless a real
+check against the real failure, and it degrades in the safe direction — every
+way of losing the capability also makes the check fail.
 
 ## Evidence base
 
@@ -136,15 +166,33 @@ the new gate was corrected during implementation for rejecting it.
 
 ## Risks
 
-**D10's fail-closed check is unsourced.** Root must detect at startup that it
-is not the main thread and refuse to orchestrate, because
-`tools: Agent(orchestrator)` silently does not bind outside that mode. No
-mechanism by which a running agent can observe whether it is the main thread
-was found in either Claude Code reference. It is recorded in that host's
-interface file as `main_thread_self_detection`, `supported: false`,
-`unsourced`. Phase 3 opens by sourcing it. If no mechanism exists, D10's
-enforcement is weaker than stated and this ADR is amended to say so rather
-than shipping the claim.
+**The topology does not run in the environment it was designed in.** Measured
+2026-09-17: `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`, and a dispatched
+subagent asking for the `Agent` tool is told *"No such tool available: Agent.
+Agent is disabled for this session, in subagents as well as here."* An
+orchestrator is a subagent. At depth 1 it cannot dispatch workers, so
+root → orchestrator → workers collapses to root → orchestrator, and the
+orchestrator has nobody to orchestrate.
+
+This is the largest open risk in the ADR and it is not resolved by any decision
+above. Three ways out, none yet chosen: raise the cap through the environment
+variable and make that a documented install prerequisite; run workers as
+separate sessions rather than nested subagents; or accept two levels and let
+root dispatch workers directly, which abandons D3's isolation. The first is
+cheapest and the most fragile — it depends on an operator setting a variable
+whose default is controlled remotely.
+
+**A remotely-defaulted cap cannot be declared once.** Because the default is a
+feature value rather than a release constant, an interface file recording
+"nested delegation: yes" can become false without any version changing. The
+interface records the measurement and its date; it cannot promise the
+measurement still holds. Any check that matters must run at startup, which is
+what D11 does.
+
+**D10's identity check has no mechanism** — see D11, which replaces it with a
+capability check. The negative is empirically verified for environment
+variables specifically; an undocumented API or hook payload field could still
+carry the information.
 
 **Cursor counsels against this shape**, quoted above. Our motive is isolation
 rather than decomposition depth, which is not what that warning addresses —

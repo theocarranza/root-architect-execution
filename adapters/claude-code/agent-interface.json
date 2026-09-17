@@ -3,7 +3,10 @@
   "retrieved": "2026-09-17",
   "definition": {
     "format": "markdown-yaml",
-    "locations": ["agents/<name>.md", ".claude/agents/<name>.md"],
+    "locations": [
+      "agents/<name>.md",
+      ".claude/agents/<name>.md"
+    ],
     "provenance": {
       "level": "first-party-doc",
       "source": "https://code.claude.com/docs/en/plugins-reference",
@@ -63,7 +66,13 @@
       "supported": true,
       "type": "string",
       "semantics": "Resolution order is per-invocation parameter, then frontmatter, then CLAUDE_CODE_SUBAGENT_MODEL, then the main conversation's model. An unset field therefore inherits, and a per-invocation argument overrides the frontmatter - so a frontmatter model is a default, not a pin.",
-      "values": ["sonnet", "opus", "haiku", "fable", "inherit"],
+      "values": [
+        "sonnet",
+        "opus",
+        "haiku",
+        "fable",
+        "inherit"
+      ],
       "provenance": {
         "level": "first-party-doc",
         "source": "https://code.claude.com/docs/en/sub-agents",
@@ -75,7 +84,13 @@
     "effort": {
       "supported": true,
       "type": "enum",
-      "values": ["low", "medium", "high", "xhigh", "max"],
+      "values": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
       "default": "Inherits session effort level.",
       "semantics": "Available levels depend on the model.",
       "provenance": {
@@ -112,7 +127,11 @@
     "memory": {
       "supported": true,
       "type": "enum",
-      "values": ["user", "project", "local"],
+      "values": [
+        "user",
+        "project",
+        "local"
+      ],
       "default": "No persistent memory.",
       "semantics": "Persistent recall across dispatches.",
       "provenance": {
@@ -125,7 +144,9 @@
     "isolation": {
       "supported": true,
       "type": "enum",
-      "values": ["worktree"],
+      "values": [
+        "worktree"
+      ],
       "default": "No isolation.",
       "semantics": "Runs the subagent in a temporary git worktree. Chosen in the definition, not per invocation.",
       "provenance": {
@@ -205,10 +226,13 @@
     },
     "main_thread_self_detection": {
       "supported": false,
-      "semantics": "Whether a running agent can observe that it IS or IS NOT the main thread. ADR 0003 D10 requires this so root can refuse to orchestrate when its Agent(type) restriction did not bind. No mechanism was found in the sub-agent or plugin references.",
+      "semantics": "Whether a running agent can observe that it is or is not the main thread. It cannot, by any means this project could find or measure. Environment is not it: a dispatched subagent's environment was captured and is byte-identical to its parent's - all 49 CLAUDE_*/ANTHROPIC_* variables present with identical values, including CLAUDE_CODE_SESSION_ID. The host does track this internally (agentDepth is threaded through the binary's tool-filter function alongside agentType and permissionMode, and spawnDepth is recorded per task) but does not surface it to the agent. What IS observable is the consequence: an agent whose definition grants a tool can check whether that tool is actually present in its toolset. That is the basis for a fail-closed check that does not require knowing one's own depth.",
       "provenance": {
-        "level": "unsourced",
-        "caveat": "Absence of evidence from two doc pages, not evidence of absence. Until sourced, D10's fail-closed startup check cannot be specified and no role may depend on it."
+        "level": "empirically-verified",
+        "source": "probe run 2026-09-17: parent and dispatched-subagent environments captured and diffed; binary strings at /opt/claude-code/bin/claude inspected",
+        "retrieved": "2026-09-17",
+        "quote": "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1",
+        "caveat": "A verified negative for environment variables specifically, plus absence from the sub-agent and plugin references. Not proof that no mechanism exists anywhere in the host - an undocumented API or a hook payload field could still carry it."
       }
     }
   },
@@ -217,13 +241,14 @@
     "mechanism": "The Agent tool present in the agent's tools allowlist.",
     "nested": {
       "supported": true,
-      "gate": "Agent present in the dispatched agent's own tools allowlist. Omitting it is enforcement, not a request.",
-      "max_depth": null,
+      "gate": "Agent present in the dispatched agent's own tools allowlist - AND the runtime nesting cap being high enough to reach that depth. The allowlist is necessary, not sufficient.",
+      "max_depth": 1,
       "provenance": {
-        "level": "first-party-doc",
-        "source": "https://code.claude.com/docs/en/sub-agents",
+        "level": "empirically-verified",
+        "source": "probe run 2026-09-17 in this session: a dispatched general-purpose subagent was asked to call the Agent tool",
         "retrieved": "2026-09-17",
-        "quote": "If Agent is omitted entirely, the subagent cannot spawn any subagents."
+        "quote": "Error: No such tool available: Agent. Agent is disabled for this session, in subagents as well as here.",
+        "caveat": "DOCUMENTATION AND REALITY DISAGREE, AND REALITY IS NARROWER. The sub-agent reference implies nesting is available whenever Agent is granted ('If Agent is omitted entirely, the subagent cannot spawn any subagents'). Empirically the depth is capped by CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, observed as 1 in this environment, and at the cap the Agent tool is withheld from the subagent's toolset entirely rather than offered and refused. The installed binary carries the refusal for the other path - 'Subagent nesting limit reached (depth ...). Complete this task directly using your tools instead of spawning another agent. If the user explicitly requested deeper nesting, ask them to raise CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH' - under the ids subagent_depth_cap and depth_limit. The cap's DEFAULT is a remotely-controlled feature value (maxSubagentSpawnDepthFromGrowthBook, integer >= 1), so it is neither a static host property nor under this project's control, and may differ per environment or change with no local change at all. max_depth: 1 records what was measured here, not a host constant."
       }
     },
     "provenance": {

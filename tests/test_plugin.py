@@ -2048,10 +2048,25 @@ class AgentInterfaceTests(unittest.TestCase):
         self.assertIn("drift", result.stderr)
 
     def test_gate_rejects_a_first_party_claim_with_no_quote(self):
+        """Strips the quote from whichever first-party claim comes first.
+
+        Deliberately not pinned to a named field: a claim's provenance LEVEL
+        legitimately changes as evidence improves, and an earlier version of
+        this test broke when one was upgraded from first-party-doc to
+        empirically-verified. Pinning would have made a real improvement look
+        like a regression.
+        """
         tree = self.sandbox()
         path = tree / "adapters/claude-code/agent-interface.json"
         document = json.loads(path.read_text(encoding="utf-8"))
-        document["delegation"]["nested"]["provenance"].pop("quote")
+
+        for _, prov in validate_interfaces.walk_provenance(document, []):
+            if prov.get("level") in ("first-party-doc", "first-party-source"):
+                prov.pop("quote")
+                break
+        else:
+            self.fail("no first-party claim to strip - the fixture this test "
+                      "depends on is gone, so it is no longer testing anything")
         path.write_text(json.dumps(document, indent=2), encoding="utf-8")
 
         result = self.run_gate(tree)
