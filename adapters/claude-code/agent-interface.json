@@ -234,6 +234,18 @@
         "quote": "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1",
         "caveat": "A verified negative for environment variables specifically, plus absence from the sub-agent and plugin references. Not proof that no mechanism exists anywhere in the host - an undocumented API or a hook payload field could still carry it."
       }
+    },
+    "hook_agent_identity": {
+      "supported": true,
+      "type": "string",
+      "semantics": "What a PreToolUse hook receives as agent_type. Carried by an agent HAVING an identity, not by it being a subagent: a dispatched subagent reports agent_type and agent_id; an agent launched as its own process with --agent reports agent_type and no agent_id; an ordinary main session with no --agent reports neither. A plugin agent reports its namespaced name, which role_for()'s rsplit(':', 1)[-1] resolves to the same role either way. Identity-aware guards therefore keep working when a worker is launched as a process rather than dispatched as a subagent - which is what makes script dispatch viable.",
+      "provenance": {
+        "level": "empirically-verified",
+        "source": "probe run 2026-09-17: a logging PreToolUse hook in a throwaway workspace across four launch shapes (main session, dispatched subagent, --agent with a project agent, --agent with an installed plugin agent)",
+        "retrieved": "2026-09-17",
+        "quote": "{\"agent_type\": \"thermos-claude:thermo-nuclear-review-subagent\", \"tool_name\": \"Read\", ...}",
+        "caveat": "Measured with a PROJECT-level hook. Whether a plugin-shipped hooks.json registers in a --agent process was not measured, though smoke_install.py establishes that plugin hooks register in an ordinary session and a --agent process is one."
+      }
     }
   },
   "delegation": {

@@ -195,9 +195,17 @@ feature value. An environment where the operator cannot set variables at all
 has no path under D12. The fallback there is specified in
 [[Script Dispatch]] — the envelope protocol is deliberately independent of how
 a worker is launched, so D5, D6 and D9 hold either way and that migration
-rewrites dispatch while leaving the protocol intact. It carries one unmeasured
-risk of its own: a worker launched as its own process may not report the
-`agent_type` this repository's write guard keys on.
+rewrites dispatch while leaving the protocol intact.
+
+That pattern's one unmeasured risk — whether a worker launched as its own
+process still reports the `agent_type` this repository's guards key on — **was
+measured on 2026-09-17 and does not hold**. Identity travels with `--agent`,
+not with being a subagent. Script dispatch is therefore not merely a fallback:
+it needs no nesting, so it would remove D12's dependency on a remotely-defaulted
+variable rather than work around it, and a script cannot drift or be
+prompt-injected where an agent orchestrator can. **D12 stands as the measured,
+lower-risk path to a working Phase 4; whether the orchestrator should remain an
+agent at all is now an open question rather than a settled one.**
 
 **A remotely-defaulted cap cannot be declared once.** Because the default is a
 feature value rather than a release constant, an interface file recording
