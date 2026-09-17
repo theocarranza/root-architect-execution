@@ -89,7 +89,7 @@ documented post-install callback for custom agents, so activate them explicitly:
 
 ```bash
 python3 "$PLUGIN_ROOT/scripts/validate_roles.py" --host codex
-python3 "$PLUGIN_ROOT/scripts/install_codex.py" --target .codex/agents --plugin-root "$PLUGIN_ROOT"
+python3 "$PLUGIN_ROOT/install.py" --target .codex/agents --plugin-root "$PLUGIN_ROOT"
 ```
 
 The bootstrap is idempotent and keeps generated agents out of the source tree.

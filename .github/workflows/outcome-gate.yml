@@ -61,8 +61,10 @@ jobs:
       # The bundle gate, not just the agent files. A rebuild into a temp
       # directory and a byte comparison, because a hash manifest cannot tell a
       # stale bundle from a current one.
-      - name: Built bundle matches its sources
-        run: python3 scripts/build_adapter.py --host claude-code --check
+      - name: Built bundles match their sources
+        run: |
+          python3 scripts/build_adapter.py --host claude-code --check
+          python3 scripts/build_adapter.py --host codex --check
 
       # What each host actually offers, and whether every role depends only
       # on capabilities that host declares AND sources. An unsourced claim

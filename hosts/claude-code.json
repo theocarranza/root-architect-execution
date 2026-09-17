@@ -3,7 +3,7 @@
   "verified_on": "2026-09-17",
   "source": "https://code.claude.com/docs/en/sub-agents (frontmatter table, resolution order, limitations) and https://code.claude.com/docs/en/plugins-reference (the plugin-shipped agent restriction and its supported-field list), cross-checked against strings in the installed 2.1.269 binary. The delegate_scope entry is sourced in adapters/claude-code/agent-interface.json. Full contract with per-claim provenance: AI_Codex/Knowledge/Claude Code Subagent Contract.md.",
   "agent_dir": "agents",
-  "bundled_dir": "agents",
+  "bundled_dir": "adapters/claude-code/agents",
   "root_placeholder": "${CLAUDE_PLUGIN_ROOT}",
   "format": "markdown-yaml",
   "required_fields": [

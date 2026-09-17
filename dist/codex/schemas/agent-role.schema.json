@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://root-architect-execution/schemas/agent-role.schema.json",
+  "title": "Agent role manifest",
+  "description": "The host-independent declaration of one agent in this architecture. This is the single source of truth for the agent's model tier, reasoning strength, tool grant, and mutation class; every host agent file is generated from it by scripts/render_agents.py. Prose lives in references/agents/<id>.md and is never duplicated here.",
+  "type": "object",
+  "required": [
+    "id",
+    "kind",
+    "role",
+    "description",
+    "mutation",
+    "model",
+    "reasoning",
+    "tools",
+    "must_not",
+    "returns",
+    "prose"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,48}[a-z0-9]$",
+      "description": "Agent name as hosts see it. Lowercase and hyphens only, because Claude Code and Cursor both derive the invocation name from it."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "worker",
+        "orchestrator",
+        "root"
+      ],
+      "description": "What this manifest is FOR, which is not the same question as which position it fills. A worker is dispatched and returns a contract. The orchestrator dispatches workers, judges what they return, and talks to root through the mailbox. Root is dispatched by nobody: it runs as the main thread, holds the operator channel, and dispatches only the orchestrator. That last difference is not cosmetic - every derivation in this repository that reasons about delegation asks whether the role is itself dispatched, because a dispatched agent that delegates needs NESTED delegation and a main-thread one does not."
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "implementer",
+        "spec-validator",
+        "quality-validator",
+        "orchestrator",
+        "root"
+      ],
+      "description": "Which position this manifest fills. The three worker positions are a fixed three-agent loop, not an extensible registry: exactly one manifest each, and so is the orchestrator, and so is root. `kind` is what keeps that invariant enforceable now that manifests exist which are not workers."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 40,
+      "description": "Host-facing trigger description. Must say what the role returns and that it is dispatched by root, so nothing invokes it as a general-purpose helper."
+    },
+    "mutation": {
+      "type": "string",
+      "enum": [
+        "read-only",
+        "read-and-run",
+        "write-scoped"
+      ],
+      "description": "Portable capability class, and the thing hosts disagree about most. 'read-only' means no shell and no write tools. 'read-and-run' means a shell exists solely to rerun named acceptance commands. 'write-scoped' means edits are permitted, but only inside the brief's write paths \u2014 a boundary no host enforces, so a write-scoped role always carries an unenforced disclosure."
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "default",
+        "escalation"
+      ],
+      "additionalProperties": false,
+      "description": "Cheapest-viable tier plus the ordered escalation path. Never 'inherit': every host defaults to inheriting the parent, which silently makes a cheap worker as expensive as root.",
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/modelTier"
+        },
+        "escalation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/modelTier"
+          },
+          "description": "Ordered, strictly increasing tiers. Root advances exactly one step per recorded failure, never on a hunch."
+        }
+      }
+    },
+    "reasoning": {
+      "type": "object",
+      "required": [
+        "default",
+        "escalation"
+      ],
+      "additionalProperties": false,
+      "description": "Reasoning strength. Expressed portably here; rendered into whatever each host actually supports, or disclosed as unenforced where it supports nothing.",
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/effort"
+        },
+        "escalation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/effort"
+          }
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "required": [
+        "allow",
+        "deny"
+      ],
+      "additionalProperties": false,
+      "description": "Portable tool intent. 'allow' is the complete grant; 'deny' is belt-and-braces for hosts that support a denylist, and documentation everywhere else.",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/toolIntent"
+          },
+          "description": "The full grant. An empty shell grant is expressed by omitting 'run-commands', not by granting it and asking the agent not to use it."
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolIntent"
+          }
+        },
+        "shell_purpose": {
+          "type": "string",
+          "description": "Required by scripts/validate_roles.py whenever 'run-commands' is in 'allow'. Naming the single reason a shell exists is what stops it becoming a general grant."
+        }
+      }
+    },
+    "must_not": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "commit",
+          "stage",
+          "spawn-agents",
+          "widen-scope",
+          "ask-owner",
+          "edit-files",
+          "run-commands",
+          "handoff-to-peer",
+          "plan-work",
+          "interfere-with-dispatch"
+        ]
+      },
+      "description": "Prohibitions the role carries. Entries that hooks/ can enforce mechanically are enforced; the rest are rendered into the agent's own instructions and into the enforcement disclosure. `interfere-with-dispatch` is root's: hooks/root_write_guard.py refuses a root write inside an open dispatch's write paths, so the manifest and the shipped guard must agree about it."
+    },
+    "returns": {
+      "type": "string",
+      "enum": [
+        "implementer-report.schema.json",
+        "validator-verdict.schema.json",
+        "orchestrator-outcome.schema.json",
+        "none"
+      ],
+      "description": "The contract this agent must return, as a single fenced JSON block. Root validates a worker's or the orchestrator's return with scripts/check_return.py before acting on it. Root itself returns `none`: it answers to the operator in prose, and there is nobody above it to validate a schema."
+    },
+    "prose": {
+      "type": "string",
+      "pattern": "^references/agents/[a-z0-9-]+\\.md$",
+      "description": "Path to the canonical role prose. Host agent files point at it rather than restating it, so the role text exists in exactly one place."
+    },
+    "launch": {
+      "type": "object",
+      "required": [
+        "main_thread",
+        "delegates_to"
+      ],
+      "additionalProperties": false,
+      "description": "How this agent is started, and what it may start. Present only on a root manifest - every other agent in this architecture is dispatched, and a dispatched agent has no launch of its own to declare. scripts/validate_roles.py refuses it elsewhere; the schema cannot, having no `not`.",
+      "properties": {
+        "main_thread": {
+          "const": true,
+          "description": "Root runs as the main thread and only as the main thread. It is a constant rather than a boolean because there is no other value this architecture supports: the type restriction root's isolation rests on binds only for a main-thread agent, so a root launched any other way is a root whose boundary is not in force. See ADR 0003 D10."
+        },
+        "delegates_to": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "description": "The role ids root may dispatch, by `role` rather than by `id`. Rendered into the host's own scoping syntax where it has one, and disclosed as unenforced where it does not. Every entry must name a role manifest that exists, which is what stops this drifting into a list of agents nobody ships."
+        },
+        "initial_prompt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Submitted automatically when root starts, on hosts that support it. This is where the startup capability check of ADR 0003 D11 is triggered: a check root has to remember to run is a check that does not run on the session where it matters."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "modelTier": {
+      "type": "string",
+      "enum": [
+        "cheap",
+        "mid",
+        "strong"
+      ],
+      "description": "Vendor-neutral tier. hosts/<host>.json maps each tier to that host's own model id, so a role manifest never names a vendor model."
+    },
+    "effort": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "description": "Reasoning strength, in Claude Code's vocabulary because it is the most granular of the supported hosts. hosts/<host>.json maps these onto coarser scales, and declares when a host can express none of them."
+    },
+    "toolIntent": {
+      "type": "string",
+      "enum": [
+        "read-files",
+        "search-files",
+        "edit-files",
+        "create-files",
+        "run-commands",
+        "delegate"
+      ],
+      "description": "Portable intent, not a host tool name. hosts/<host>.json maps each intent to concrete tool names; an intent a host cannot express is a rendering error, not a silent drop."
+    }
+  },
+  "anyOf": [
+    {
+      "properties": {
+        "kind": {
+          "const": "worker"
+        },
+        "role": {
+          "enum": [
+            "implementer",
+            "spec-validator",
+            "quality-validator"
+          ]
+        },
+        "returns": {
+          "enum": [
+            "implementer-report.schema.json",
+            "validator-verdict.schema.json"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "orchestrator"
+        },
+        "role": {
+          "const": "orchestrator"
+        },
+        "returns": {
+          "const": "orchestrator-outcome.schema.json"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "root"
+        },
+        "role": {
+          "const": "root"
+        },
+        "returns": {
+          "const": "none"
+        }
+      },
+      "required": [
+        "launch"
+      ]
+    }
+  ]
+}

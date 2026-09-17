@@ -17,14 +17,19 @@ materialize this repository's custom agent TOMLs. After installing, activate
 the agents explicitly:
 
 ```bash
-codex plugin add /path/to/root-architect-execution
-python3 /path/to/root-architect-execution/scripts/install_codex.py \
+python3 scripts/build_adapter.py --host codex        # from a clone
+codex plugin add /path/to/dist/codex
+python3 /path/to/dist/codex/install.py \
   --target .codex/agents \
-  --plugin-root /path/to/root-architect-execution
+  --plugin-root /path/to/dist/codex
 ```
 
-The bootstrap is idempotent, resolves references to the installed plugin copy,
-and never writes generated agents into the source repository.
+`install.py` ships **inside** the bundle, and so does everything it reads, so
+the bundle is self-sufficient: it re-renders each TOML with the installed
+plugin root substituted in, which is what makes a worker's role prose
+resolvable on the machine running it. The bootstrap is idempotent, removes only
+files its own marker recorded, and never writes generated agents into the
+source repository.
 Codex does not document worker identity in `PreToolUse`, so root-versus-worker
 write separation is instructional and enforced by root's diff review. Claude's
 identity-aware write guard remains active.
@@ -173,11 +178,11 @@ has actually gone missing.
 | `roles/*.json` | Every agent — the three workers, the orchestrator, and root — as model tier, reasoning strength, tool grant, mutation class |
 | `hosts/*.json` | What each host can actually express, with the date and evidence behind every claim |
 | `agents/*.md` | **Generated.** The Claude Code agent files |
-| `dist/<host>/` | **Generated.** `claude-code/` is a built, byte-gated bundle; `codex/` and `cursor/` are still reference agent copies |
+| `dist/<host>/` | **Built.** `claude-code/` and `codex/` are installable, byte-gated bundles; `cursor/` is still a reference agent copy |
 | `references/agents/*.md` | The role prose, written once and pointed at, never copied |
 | `references/contracts.md` | The four shapes the loop passes around |
 | `schemas/*.json` | Real JSON Schemas for roles, hosts, briefs, reports, verdicts, dispatch state |
-| `adapters/<host>/` | That host's **mechanics**: hooks, manifest templates, the interface file, and where each piece lands in the bundle. Never role content |
+| `adapters/<host>/` | That host's **mechanics** — hooks, manifest templates, the installer, the interface file, the layout — plus `agents/`, which is generated. Never hand-written role content |
 | `scripts/` | Capability gate, interface gate, renderer, builder, return gate, dispatch state, mailbox, job queue, startup check |
 | `tests/` | `python3 -m unittest discover -s tests -t .` |
 
@@ -199,7 +204,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/check_return.py" \
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" verify
 ```
 
-When contributing to *this* repo, the outcome gate is these nine, and none of
+When contributing to *this* repo, the outcome gate is these ten, and none of
 them is optional:
 
 ```bash
@@ -207,6 +212,7 @@ python3 -m unittest discover -s tests -t .
 python3 scripts/render_agents.py --host claude-code --check
 python3 scripts/render_agents.py --host codex --check
 python3 scripts/build_adapter.py --host claude-code --check
+python3 scripts/build_adapter.py --host codex --check
 python3 scripts/validate_interfaces.py
 python3 scripts/validate_roles.py
 python3 scripts/smoke_install.py --host claude-code
@@ -221,8 +227,13 @@ over a real defect:
   manifest that disagrees with
   itself passes them cleanly. A version bump moved `plugin.json` and left the
   marketplace entry behind, and only `claude plugin validate` noticed.
-- `--check` is per host. A `hosts/codex.json` change leaves `agents/` in sync
-  and `dist/codex/` stale.
+- `--check` is per host, and both hosts are now gated. A `hosts/codex.json`
+  change leaves Claude Code's bundle in sync and `dist/codex/` stale, which is
+  why CI runs the byte check for each.
+- A byte-perfect Codex bundle can still be unusable: Codex needs an explicit
+  bootstrap, so the suite runs `install.py` from a copy of the built bundle
+  with nothing else on the path. `--check` proves the copy was faithful, never
+  that the result can act.
 - `smoke_install.py` is the only gate that runs the **host** against the
   artifact. Everything above reasons about files; this installs the built
   bundle into a throwaway `HOME` and asks Claude Code to enumerate what it

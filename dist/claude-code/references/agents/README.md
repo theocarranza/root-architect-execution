@@ -7,13 +7,14 @@ flowchart LR
   ROLE["roles/*.json<br/>model, effort, tools, mutation"] --> GEN["scripts/render_agents.py"]
   HOST["hosts/*.json<br/>what this host can express"] --> GEN
   PROSE["references/agents/*.md<br/>the role itself"] -.->|"referenced, never copied"| GEN
-  GEN --> A["agents/*.md — Claude Code"]
-  GEN --> B["dist/codex/*.toml"]
+  GEN --> A["adapters/claude-code/agents/*.md"]
+  GEN --> B["adapters/codex/agents/*.toml"]
   GEN --> C["dist/cursor/*.md"]
+  A & B --> BUILD["scripts/build_adapter.py"] --> DIST["dist/&lt;host&gt;/ — installable"]
   GEN --> D["Enforcement disclosures"]
 ```
 
-Nothing under `agents/` or `dist/` is hand-written. Edit the role manifest and
+Nothing under `adapters/*/agents/` or `dist/` is hand-written. Edit the role manifest and
 regenerate; `scripts/validate_roles.py` fails the capability gate on any drift,
 because a hand-edited agent file silently disagrees with the manifest that every
 checkpoint quotes.

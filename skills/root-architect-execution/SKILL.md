@@ -20,13 +20,13 @@ callback for custom agents, so materialize them explicitly before dispatching:
 ```bash
 python3 "$PLUGIN_ROOT/scripts/validate_roles.py" --host codex
 python3 "$PLUGIN_ROOT/scripts/render_agents.py" --host codex --check
-python3 "$PLUGIN_ROOT/scripts/install_codex.py" --target .codex/agents --plugin-root "$PLUGIN_ROOT"
+python3 "$PLUGIN_ROOT/install.py" --target .codex/agents --plugin-root "$PLUGIN_ROOT"
 ```
 
 Start a new Codex conversation afterwards so the custom agents load from the
 installed state. The source repository keeps generated reference files in
-`dist/codex`; the bootstrap writes the active TOMLs to the selected Codex agent
-directory and never into the source tree.
+`adapters/codex/agents`; the bootstrap writes the active TOMLs to the selected
+Codex agent directory and never into the source tree.
 
 Codex does not document worker identity in `PreToolUse`, so root-versus-worker
 write separation is instructional and enforced by root's review of the worker
