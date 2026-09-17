@@ -1,0 +1,26 @@
+{
+  "task": "Task 1 quality check — slugify defect hunt and rerun",
+  "attempt": 1,
+  "max_attempts": 3,
+  "role": "quality-validator",
+  "model": "haiku",
+  "effort": "medium",
+  "read_paths": ["src/slugify.py", "tests/test_slugify.py", ".root-architect/briefs/20260917-e2e/implement-slugify.json"],
+  "write_paths": [],
+  "acceptance": [
+    {
+      "command": "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v",
+      "expect": "all pass; record the observed counts verbatim in commands_rerun"
+    }
+  ],
+  "constraints": [
+    "Reachability: src/slugify.py is a single pure function with no imports and no other module in the repository imports it, so the unittest suite over tests/ is the full reachable set.",
+    "pytest is NOT installed. Use unittest from the standard library only.",
+    "Rerun the acceptance command yourself and record what you actually observed. Do not repeat the implementer's numbers.",
+    "Probe the function for defects the suite would miss — at minimum: a string that is entirely separators, a string with a trailing separator run, unicode input, and a non-string input if the interface implies one.",
+    "Every finding needs a concrete failure_scenario: an input, the actual output, and the expected output. A style preference without a failure scenario is not a defect.",
+    "Do not edit any file and do not run Git mutations. You are read-and-run."
+  ],
+  "owner_owned_paths": [],
+  "expected_result": "PASS with the observed suite counts recorded, or FINDINGS in which each entry names one required fix and a reproducible failure scenario."
+}

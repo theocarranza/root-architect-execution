@@ -1,0 +1,4 @@
+{
+  "tools": ["Read", "Edit", "Write", "Bash", "Agent"],
+  "agent_types": ["root-architect-execution:orchestrator"]
+}
