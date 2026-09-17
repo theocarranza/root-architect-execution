@@ -3,7 +3,20 @@
 
 Codex plugin installation copies a plugin bundle; it does not interpret this
 repository's host manifest as a custom-agent installation step. This explicit,
-idempotent bootstrap is therefore required after adding the plugin.
+idempotent bootstrap is therefore required after adding the plugin. Claude Code
+needs no equivalent, which ADR 0001 calls luck rather than design: its
+marketplace happens to be a native install path and Codex's is not.
+
+This is the host mechanic ADR 0001 step 4 moved out of scripts/. It runs from
+two places, so like the write guard and the renderer's manifest lookup it names
+both in order rather than searching:
+
+    adapters/codex/install.py  ->  repository root two levels up
+    <bundle>/install.py        ->  the bundle root itself
+
+Each of those three resolutions is written out locally rather than shared. A
+helper would have to live in scripts/, and every one of them exists precisely
+to find scripts/.
 """
 import argparse
 import json
@@ -11,8 +24,17 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
-sys.path.insert(0, str(HERE))
+for _candidate in (HERE.parent.parent, HERE):
+    if (_candidate / "scripts" / "render_agents.py").is_file():
+        ROOT = _candidate
+        break
+else:
+    raise SystemExit(
+        "cannot find the plugin root from %s: looked for scripts/render_agents.py "
+        "two levels up and beside this file. Without it the agents cannot be "
+        "rendered, and writing nothing is the right outcome - a half-installed "
+        "agent directory is worse than an absent one." % HERE)
+sys.path.insert(0, str(ROOT / "scripts"))
 import render_agents  # noqa: E402
 
 

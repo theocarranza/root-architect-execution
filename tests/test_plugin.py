@@ -23,12 +23,25 @@ SCRIPTS = ROOT / "scripts"
 # runtime they still land at <plugin root>/hooks/, which is what the
 # guards' own messages refer to.
 HOOKS = ROOT / "adapters" / "claude-code" / "hooks"
+# ADR 0001 step 4: generated agents now live in the adapter that ships them,
+# for every host. dist/<host>/ could not double as the renderer's output any
+# more - build_adapter empties that directory before writing it.
+CLAUDE_AGENTS = ROOT / "adapters" / "claude-code" / "agents"
 sys.path.insert(0, str(SCRIPTS))
 
 from jsonschema_mini import Validator  # noqa: E402
 from dispatch_state import DispatchStateError  # noqa: E402
 import render_agents  # noqa: E402
-import install_codex  # noqa: E402
+
+# The Codex installer is a host MECHANIC, not a shared script, so it is loaded
+# by path rather than imported off sys.path. Putting adapters/codex/ on the
+# path would also make every other host's mechanics importable by bare name,
+# which is the coupling the adapter directories exist to prevent.
+import importlib.util  # noqa: E402
+_spec = importlib.util.spec_from_file_location(
+    "codex_install", ROOT / "adapters" / "codex" / "install.py")
+install_codex = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(install_codex)
 import build_adapter  # noqa: E402
 import smoke_install  # noqa: E402
 import validate_interfaces  # noqa: E402
@@ -238,7 +251,7 @@ class RoleAndHostManifestTests(unittest.TestCase):
 class RenderTests(unittest.TestCase):
 
     def test_codex_manifest_and_skill_are_installable(self):
-        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
+        manifest = json.loads((ROOT / "adapters/codex/manifest.template.json").read_text())
         self.assertEqual(manifest["name"], "root-architect-execution")
         self.assertEqual(manifest["skills"], "./skills")
         self.assertIn("defaultPrompt", manifest["interface"])
@@ -363,7 +376,7 @@ class RenderTests(unittest.TestCase):
     def test_generated_claude_agents_declare_all_four_axes(self):
         for name in ("impl-executor", "spec-validator", "quality-validator"):
             with self.subTest(agent=name):
-                text = (ROOT / "agents" / (name + ".md")).read_text(encoding="utf-8")
+                text = (CLAUDE_AGENTS / (name + ".md")).read_text(encoding="utf-8")
                 head = text.split("---")[1]
                 self.assertIn("model:", head)
                 self.assertIn("effort:", head)
@@ -371,7 +384,7 @@ class RenderTests(unittest.TestCase):
                 self.assertNotIn("inherit", head)
 
     def test_read_only_role_gets_no_write_or_shell_tool(self):
-        head = (ROOT / "agents" / "spec-validator.md").read_text(
+        head = (CLAUDE_AGENTS / "spec-validator.md").read_text(
             encoding="utf-8").split("---")[1]
         tools = [line for line in head.splitlines() if line.startswith("tools:")][0]
         for forbidden in ("Edit", "Write", "Bash"):
@@ -414,7 +427,7 @@ class RenderTests(unittest.TestCase):
             self.assertNotIn("Allowed: .", text,
                            f"Found malformed 'Allowed: .' in {toml_file.name}")
         # Check agents/ directory
-        for md_file in (ROOT / "agents").glob("*.md"):
+        for md_file in CLAUDE_AGENTS.glob("*.md"):
             text = md_file.read_text(encoding="utf-8")
             self.assertNotIn("Allowed: .", text,
                            f"Found malformed 'Allowed: .' in {md_file.name}")
@@ -640,7 +653,7 @@ class RenderTests(unittest.TestCase):
 
     def test_generated_agents_state_the_enforcement_on_disk(self):
         """Guards the committed artifacts, not the code path above."""
-        for path in sorted((ROOT / "agents").glob("*.md")):
+        for path in sorted(CLAUDE_AGENTS.glob("*.md")):
             with self.subTest(agent=path.stem):
                 text = path.read_text(encoding="utf-8")
                 self.assertIn("What this host **does** enforce", text)
@@ -699,10 +712,23 @@ class AdapterBuildTests(unittest.TestCase):
         self.assertEqual(strays, [])
 
     def test_committed_bundle_matches_a_fresh_build(self):
-        result = run(SCRIPTS / "build_adapter.py",
-                     ["--host", "claude-code", "--check"])
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("in sync", result.stdout)
+        """Every built host, not just the first one.
+
+        This checked claude-code alone until ADR 0001 step 4 added a second
+        bundle, and CI gained the codex check while the suite did not - so
+        `python3 -m unittest` passed over a stale Codex bundle. Derived from
+        the layouts rather than listed, so a third host is covered the day its
+        layout lands instead of the day somebody remembers this file.
+        """
+        built = sorted(p.parent.name for p in
+                       (ROOT / "adapters").glob("*/layout.json"))
+        self.assertIn("codex", built, "fixture broken: no codex layout")
+        for host in built:
+            with self.subTest(host=host):
+                result = run(SCRIPTS / "build_adapter.py", ["--host", host, "--check"])
+                self.assertEqual(result.returncode, 0,
+                                 result.stdout + result.stderr)
+                self.assertIn("in sync", result.stdout)
 
     def test_check_catches_a_source_change_that_was_never_rebuilt(self):
         """The case a path -> hash manifest cannot catch.
@@ -2103,10 +2129,10 @@ class OrchestratorRoleTests(unittest.TestCase):
             role, host, render_agents.resolve_tools(role, host)[2]))
         self.assertIn("Which agents you may dispatch is **not enforced**", notes)
 
-        generated = (ROOT / "agents/orchestrator.md").read_text(encoding="utf-8")
+        generated = (CLAUDE_AGENTS / "orchestrator.md").read_text(encoding="utf-8")
         self.assertIn("Which agents you may dispatch is **not enforced**", generated)
 
-        worker = (ROOT / "agents/impl-executor.md").read_text(encoding="utf-8")
+        worker = (CLAUDE_AGENTS / "impl-executor.md").read_text(encoding="utf-8")
         self.assertNotIn("Which agents you may dispatch", worker,
                          "a worker holds no delegation, so the disclosure is noise there")
 
@@ -2489,8 +2515,9 @@ class AgentInterfaceTests(unittest.TestCase):
             "caveat": "forced unsourced by a test",
         }
         path.write_text(json.dumps(document, indent=2), encoding="utf-8")
-        self.assertTrue((tree / "agents/orchestrator.md").exists(),
-                        "fixture broken: the built artifact this test attacks is gone")
+        self.assertTrue(
+            (tree / "adapters/claude-code/agents/orchestrator.md").exists(),
+            "fixture broken: the built artifact this test attacks is gone")
 
         result = self.run_gate(tree)
         self.assertEqual(result.returncode, 1,
@@ -2665,7 +2692,7 @@ class RootAgentTests(unittest.TestCase):
         self.assertTrue(enforced)
         self.assertIn("Dispatch scope is enforced", note)
 
-        generated = (ROOT / "agents/root-architect.md").read_text(encoding="utf-8")
+        generated = (CLAUDE_AGENTS / "root-architect.md").read_text(encoding="utf-8")
         self.assertIn("tools: Read, Grep, Glob, Edit, Write, Bash, "
                       "Agent(root-architect-execution:orchestrator)", generated)
 
@@ -2722,7 +2749,7 @@ class RootAgentTests(unittest.TestCase):
     # --- the startup prompt -------------------------------------------------
 
     def test_the_startup_prompt_is_auto_submitted_where_the_host_can(self):
-        generated = (ROOT / "agents/root-architect.md").read_text(encoding="utf-8")
+        generated = (CLAUDE_AGENTS / "root-architect.md").read_text(encoding="utf-8")
         self.assertIn("initialPrompt: \"Before anything else", generated)
         self.assertIn("## Startup", generated)
 
@@ -2946,6 +2973,58 @@ class PreflightTests(unittest.TestCase):
         ok, why = root_preflight.passed(self.ws, self.RUN)
         self.assertFalse(ok)
         self.assertIn("will not parse", why)
+
+    def test_the_codex_bundle_can_install_itself(self):
+        """The bundle is the whole deliverable, or it is a directory.
+
+        Codex needs an explicit bootstrap after the plugin is added, so a
+        bundle that ships the agents without the means to install them is
+        useless in a way no byte gate would notice - `--check` proves the copy
+        was faithful, not that the result can act. So this runs install.py from
+        a copy of the bundle with nothing else on the path, and requires it to
+        materialize every role.
+
+        ADR 0001 calls Claude Code needing no installer "luck, not design".
+        This is the test that luck does not extend to Codex.
+        """
+        bundle = self.workspace / "codex-bundle"
+        shutil.copytree(ROOT / "dist/codex", bundle)
+        target = self.workspace / "codex-target"
+
+        result = subprocess.run(
+            [sys.executable, str(bundle / "install.py"),
+             "--target", str(target), "--plugin-root", "/opt/installed-plugin"],
+            capture_output=True, text=True, cwd=str(bundle))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        roles = sorted(r["id"] for _f, r in render_agents.load_roles())
+        self.assertEqual(sorted(p.stem for p in target.glob("*.toml")), roles)
+
+        # The plugin root reaches the generated file, because a worker that
+        # cannot find its role prose has an agent file and no role.
+        text = (target / "spec-validator.toml").read_text(encoding="utf-8")
+        self.assertIn("/opt/installed-plugin/references/agents/", text)
+
+    def test_the_codex_installer_refuses_rather_than_half_installing(self):
+        """Neither position holds the plugin root: write nothing, say why.
+
+        A half-populated .codex/agents is worse than an empty one - Codex would
+        load whatever landed, and the roles that did not would simply be
+        missing, with no error anywhere to say so.
+        """
+        lonely = self.workspace / "lonely"
+        lonely.mkdir()
+        shutil.copy2(ROOT / "adapters/codex/install.py", lonely / "install.py")
+        target = self.workspace / "nothing-here"
+
+        result = subprocess.run(
+            [sys.executable, str(lonely / "install.py"), "--target", str(target)],
+            capture_output=True, text=True, cwd=str(lonely))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot find the plugin root", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertFalse(target.exists(),
+                         "it created the target directory before giving up")
 
     def test_the_two_manifests_agree_with_each_other(self):
         """The defect `claude plugin validate` exists to catch, pinned here too.

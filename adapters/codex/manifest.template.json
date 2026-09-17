@@ -1,0 +1,19 @@
+{
+  "name": "root-architect-execution",
+  "version": "0.1.1",
+  "description": "Root-architect execution protocol with generated Codex worker agents.",
+  "author": {
+    "name": "Theo Carranza",
+    "email": "theocarranza@gmail.com"
+  },
+  "skills": "./skills",
+  "interface": {
+    "displayName": "Root Architect Execution",
+    "shortDescription": "Delegated implementation with root-owned gates",
+    "longDescription": "Keeps planning, Git, and validation at the root while isolated workers implement and review changes.",
+    "developerName": "Theo Carranza",
+    "category": "Developer Tools",
+    "capabilities": ["Code execution", "Code review"],
+    "defaultPrompt": ["Run the root-owned implementation workflow."]
+  }
+}

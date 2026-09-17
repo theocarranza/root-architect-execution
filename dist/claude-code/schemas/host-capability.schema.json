@@ -38,7 +38,7 @@
     },
     "bundled_dir": {
       "type": "string",
-      "description": "Where the plugin keeps its own generated copy, relative to the plugin root. Claude Code reads agents/ directly; other hosts get a reference copy under dist/<host>/ for a project to install from."
+      "description": "Where the renderer writes this host's generated agents, relative to the repository root. Since ADR 0001 step 4 that is adapters/<host>/agents/ for every host, which is decision 3 of that ADR: generated agents live in the adapter tree, and the build places them wherever the host wants them. It cannot be dist/<host>/ any more - build_adapter empties that directory before writing it, so a renderer aiming there would be building the input to its own erasure."
     },
     "root_placeholder": {
       "type": "string",

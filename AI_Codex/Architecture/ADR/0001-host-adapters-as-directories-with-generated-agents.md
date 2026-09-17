@@ -46,7 +46,33 @@ Sequencing status, against the four steps below:
      for the marketplace line, and the suite asserts the name-and-version
      agreement directly.
 
-4. Move Codex, then Cursor — **not started**.
+4. Move Codex, then Cursor — **Codex done, 2026-09-17. Cursor blocked.**
+
+   Codex has `adapters/codex/` with its installer, manifest template, interface
+   and layout, and `dist/codex/` is now a real bundle under the same byte gate
+   as Claude Code's. Two things this step established:
+
+   - **The builder is genuinely host-agnostic.** Codex's bundle is a different
+     shape — an installer at its root, agents under `agents/`, a manifest at
+     `.codex-plugin/` — and `build_adapter.py` needed no change to produce it.
+     That was the claim `layout.json` was introduced to make, and until a
+     second shape existed it was untested.
+   - **A byte-perfect bundle can still be unusable.** Codex needs an explicit
+     bootstrap, so its bundle has to carry `install.py` *and* everything
+     `install.py` reads. `--check` would have called a bundle missing those
+     perfect. The suite now runs the installer from a copy of the built bundle
+     with nothing else on the path.
+
+   Decision 3 — generated agents in the adapter tree — is also discharged, for
+   both hosts, and it was forced rather than chosen: `build_adapter` empties
+   `dist/<host>/` before writing it, so the renderer could not keep aiming
+   there without building the input to its own erasure.
+
+   Cursor is not blocked on this work. Its nested delegation is `unsourced`
+   and its prose documentation is unreachable from this environment, so under
+   ADR 0003 D1 the orchestrator and root may not be built for it at all. An
+   adapter directory for a host that can carry three of five roles is worth
+   less than the sourcing that would let it carry five.
 
 ## Context
 
@@ -275,7 +301,8 @@ possible, not consequences of it.
    gate was provable before any file moved.
 3. Introduce `adapters/claude-code/` and `build_adapter.py`, with `dist/` byte-gated.
    **Done.** The directory, the builder and the mechanics are all in place.
-4. Move Codex, then Cursor.
+4. Move Codex, then Cursor. **Codex done**; Cursor waits on sourcing rather
+   than on engineering.
 
 Step 2 before step 3 is the load-bearing order. Building the migration first and
 the gate afterwards is how the guarantee gets lost.

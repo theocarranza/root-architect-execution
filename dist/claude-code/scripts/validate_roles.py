@@ -162,7 +162,15 @@ def check_root(role_file, role, problems):
 
 def check_host(name, roles, problems):
     host = render_agents.load_host(name)
-    out_dir = ROOT / host["bundled_dir"]
+    # Two positions again: adapters/<host>/agents/ in this tree, and wherever
+    # that host's layout places them in a bundle. The gate ships inside the
+    # bundle and is documented as the command root runs before dispatching, so
+    # looking only at the source path would make it report every agent as
+    # ungenerated on exactly the tree it was installed into.
+    out_dir = next(
+        (p for p in render_agents.both_positions(name, host["bundled_dir"])
+         if p.is_dir()),
+        ROOT / host["bundled_dir"])
     extension = ".toml" if host["format"] == "toml" else ".md"
     render = (render_agents.render_toml if host["format"] == "toml"
               else render_agents.render_markdown_yaml)

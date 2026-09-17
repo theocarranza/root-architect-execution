@@ -270,6 +270,36 @@ def delegation_scope(role, host):
            if main_thread_only else ""))
 
 
+def both_positions(host_name, source):
+    """Where a layout source sits here, and where the build puts it, in order.
+
+    Several things in this repository run from two trees: the repository, where
+    a file sits at its source path, and an installed bundle, where it sits
+    wherever that host's layout placed it. Rather than each caller learning
+    both paths, they ask the layout - so a host that nests its plugin under a
+    subdirectory is handled by its own layout entry and not by a branch in
+    shared code.
+
+    Deliberately NOT used by hooks/root_write_guard.py, which has the same
+    problem and solves it with two hardcoded paths. That guard is looking for
+    scripts/ in the first place, so it cannot import a helper that lives there.
+    """
+    adapter = ROOT / "adapters" / host_name
+    # The source position resolves the way build_adapter.resolve_source does -
+    # adapter directory first, repository root second - because that is what
+    # decides which file the build actually picked up. Reading it differently
+    # here would mean checking a file the bundle was not made from.
+    positions = [p for p in (adapter / source.rstrip("/"),
+                             ROOT / source.rstrip("/")) if p.exists()]
+    layout = adapter / "layout.json"
+    if layout.is_file():
+        place = json.loads(layout.read_text(encoding="utf-8")).get("place", {})
+        for declared, destination in place.items():
+            if declared.rstrip("/") == source.rstrip("/"):
+                positions.append(ROOT / destination.rstrip("/"))
+    return positions or [ROOT / source.rstrip("/")]
+
+
 def plugin_name(host_name):
     """The name the host loads this plugin's agents under.
 
@@ -282,19 +312,8 @@ def plugin_name(host_name):
     two hosts must name the same plugin the same way, and Codex's manifest is
     already a separate file.
     """
-    layout = ROOT / "adapters" / host_name / "layout.json"
-    candidates = [ROOT / "adapters" / host_name / "manifest.template.json"]
-    if layout.is_file():
-        # Inside an installed bundle the template is gone and its content sits
-        # wherever the layout placed it. Reading the destination out of the
-        # layout keeps this general: a host that nests its plugin under a
-        # subdirectory is handled by its own layout entry, not by a second
-        # branch here.
-        place = json.loads(layout.read_text(encoding="utf-8")).get("place", {})
-        for source, destination in place.items():
-            if source == "manifest.template.json":
-                candidates.append(ROOT / destination)
-    for candidate in candidates:
+    for candidate in both_positions(host_name, "adapters/%s/manifest.template.json"
+                              % host_name):
         if candidate.is_file():
             return json.loads(candidate.read_text(encoding="utf-8"))["name"]
     raise SystemExit(
@@ -302,7 +321,9 @@ def plugin_name(host_name):
         "loads the plugin's agents under is not guessable: a scoped dispatch "
         "grant written against a wrong name matches no agent at all, and the "
         "frontmatter still looks correct."
-        % (host_name, ", ".join(str(c) for c in candidates)))
+        % (host_name, ", ".join(str(c) for c in
+                                both_positions(host_name, "adapters/%s/manifest.template.json"
+                              % host_name))))
 
 
 def resolve_tools(role, host):

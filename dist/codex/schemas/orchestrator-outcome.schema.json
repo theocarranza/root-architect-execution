@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://root-architect-execution/schemas/orchestrator-outcome.schema.json",
+  "title": "Orchestrator outcome",
+  "description": "What the orchestrator returns to root when a run ends. Deliberately not a summary of the work: root reads the envelopes for that, and a summary written by the layer that ran the work is exactly the filtered account D5 exists to prevent. This carries the decision and the pointers, so every claim in it can be checked against the mailbox rather than believed.",
+  "type": "object",
+  "required": ["run_id", "outcome", "dispatched", "envelope_count", "rationale"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["accepted", "rejected", "blocked", "abandoned"],
+      "description": "accepted: every dispatched task came back and the orchestrator judged the work done. rejected: a validator verdict stands against the work and retries are exhausted. blocked: the orchestrator needs something only root or the operator can supply and has said so through the mailbox. abandoned: the run stopped without a judgment - a cap, a crash, an interrupt. 'abandoned' exists so that a run which merely stopped can never be recorded as one that finished."
+    },
+    "dispatched": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["worker", "envelopes"],
+        "additionalProperties": false,
+        "properties": {
+          "worker": {
+            "type": "string",
+            "pattern": "^worker:[a-z][a-z0-9-]*$"
+          },
+          "envelopes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Envelope filenames, so root can read the worker's own words instead of the orchestrator's account of them."
+          },
+          "verdict": {
+            "type": "string",
+            "description": "What this worker returned, in the worker's own vocabulary. Absent where the worker returned nothing - in which case a failure envelope names the mode, per D6."
+          }
+        }
+      },
+      "description": "One entry per worker dispatched in this run. Empty only when the run dispatched nothing at all, which is itself worth seeing."
+    },
+    "envelope_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many envelopes the run produced. Root cross-checks this against the mailbox: a mismatch means the outcome was written against a different run than the one on disk."
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why this outcome and not another, in the orchestrator's own words. This is the one field that is judgment rather than record, and it is required: an outcome with no reasoning behind it cannot be argued with, only accepted."
+    },
+    "needs_from_root": {
+      "type": "string",
+      "description": "Required in practice when outcome is 'blocked': what the orchestrator is waiting on. A blocked run that does not say what would unblock it has moved the problem rather than reported it."
+    }
+  }
+}

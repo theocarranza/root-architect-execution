@@ -33,7 +33,7 @@ rule exists to prevent.
 `bundle_root` is `.` because `marketplace.template.json` declares
 `"source": "./"`. Claude Code installs a marketplace directory source directly,
 so this host needs no installer — a fact [[0001-host-adapters-as-directories-with-generated-agents]]
-calls "luck, not design", since Codex needs `scripts/install_codex.py` and
+calls "luck, not design", since Codex needs `adapters/codex/install.py` and
 Cursor has no install path at all. A host that nests its plugin inside the
 bundle sets `bundle_root` to that subdirectory instead.
 
