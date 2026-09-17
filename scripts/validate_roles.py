@@ -57,9 +57,18 @@ def check_roles(problems):
                     problems.append(
                         "roles/%s is read-and-run but grants %s"
                         % (role_file, intent))
-        if "delegate" in role["tools"]["allow"]:
-            problems.append("roles/%s grants delegate; workers must not spawn "
-                            "agents" % role_file)
+        # Delegation is the orchestrator's defining capability and a worker's
+        # defining prohibition, so the rule is keyed on kind rather than
+        # applied blanket. Before the orchestrator existed the blanket rule was
+        # correct; it is the discriminator that keeps it correct now.
+        delegates = "delegate" in role["tools"]["allow"]
+        if role["kind"] == "worker" and delegates:
+            problems.append("roles/%s is a worker and grants delegate; only the "
+                            "orchestrator dispatches" % role_file)
+        if role["kind"] == "orchestrator" and not delegates:
+            problems.append("roles/%s is the orchestrator and does not grant "
+                            "delegate; it would have nothing to orchestrate"
+                            % role_file)
 
         overlap = set(role["tools"]["allow"]) & set(role["tools"]["deny"])
         if overlap:
@@ -84,6 +93,12 @@ def check_roles(problems):
             problems.append("the %r position is filled %d times (%s); the loop "
                             "is a fixed three-agent architecture"
                             % (name, len(files), ", ".join(files)))
+
+    # No separate count cap over `kind`. A fourth worker would have to reuse one
+    # of the three worker positions, and a second orchestrator the orchestrator
+    # position, so the one-manifest-per-position check above already refuses
+    # both. A cap here looked like defence in depth and was in fact unreachable:
+    # mutation testing caught it passing whether present or not.
     return roles
 
 
@@ -95,6 +110,15 @@ def check_host(name, roles, problems):
               else render_agents.render_markdown_yaml)
 
     for role_file, role in roles:
+        allowed, reason = render_agents.role_targets_host(role, name)
+        if not allowed:
+            # Not a problem: the renderer deliberately does not build this role
+            # here, and demanding the file would demand the thing the interface
+            # gate refuses.
+            if (out_dir / (role["id"] + extension)).exists():
+                problems.append("%s: %s exists but should not - %s"
+                                % (name, out_dir / (role["id"] + extension), reason))
+            continue
         target = out_dir / (role["id"] + extension)
         if not target.exists():
             problems.append("%s: %s has not been generated (run render_agents.py "

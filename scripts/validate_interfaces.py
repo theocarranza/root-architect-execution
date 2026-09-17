@@ -148,9 +148,44 @@ def role_needs(role):
 
 
 def check_role_against_host(role_file, role, path, document, problems):
+    """Whether what is BUILT for this host rests on anything unsourced.
+
+    The scope narrowed once render_agents learned to refuse a role a host
+    cannot carry. Before that, this function had to catch "role needs nesting,
+    host's nesting is unsourced" on its own. Now the renderer never builds that
+    pair, so asking the question of an unbuilt pair would report a combination
+    that does not exist - and skipping it would leave nothing behind.
+
+    So the question is asked of the artifact instead: for every role that IS
+    generated for this host, is every capability it depends on sourced? And for
+    every role that is NOT, is the absence real rather than a stale file left
+    looking current? The first is the guarantee; the second is the drift.
+    """
     host = document["host"]
     needs = role_needs(role)
     where = "role %s on host %s" % (role_file, host)
+
+    built, reason = render_agents.role_targets_host(role, host)
+    artifact = generated_artifact(role, host)
+
+    if not built:
+        if artifact is not None and artifact.exists():
+            problems.append(
+                "%s: %s exists although the role is not built for this host "
+                "(%s) - a leftover artifact reads as current"
+                % (where, artifact, reason))
+        return
+
+    if "nested_delegation" in needs:
+        nested = document.get("delegation", {}).get("nested", {})
+        if strength_of(nested.get("provenance")) == 0:
+            problems.append(
+                "%s: %s, and an agent file IS generated here, but nested "
+                "delegation is UNSOURCED on this host - a shipped artifact may "
+                "not rest on an assumption" % (where, needs["nested_delegation"]))
+        elif not nested.get("supported"):
+            problems.append("%s: %s, but this host cannot nest delegation"
+                            % (where, needs["nested_delegation"]))
 
     if "delegation" in needs:
         delegation = document.get("delegation", {})
@@ -161,22 +196,26 @@ def check_role_against_host(role_file, role, path, document, problems):
             problems.append("%s: %s, but this host's delegation support is unsourced"
                             % (where, needs["delegation"]))
 
-    if "nested_delegation" in needs:
-        nested = document.get("delegation", {}).get("nested", {})
-        if strength_of(nested.get("provenance")) == 0:
-            problems.append(
-                "%s: %s, but nested delegation is UNSOURCED on this host - "
-                "this is exactly the dependency that may not be assumed"
-                % (where, needs["nested_delegation"]))
-        elif not nested.get("supported"):
-            problems.append("%s: %s, but this host cannot nest delegation"
-                            % (where, needs["nested_delegation"]))
-
     # A role that withholds delegation on a host with no tool allowlist is NOT
     # an error: render_agents already emits a disclosure saying the grant is an
     # instruction only. Disclosing an unenforceable guarantee is the designed
     # behaviour, so the gate must not reject it - it would be rejecting the
     # repository's own answer to this exact problem.
+
+
+def generated_artifact(role, host):
+    """Where this role's agent file lands for this host, or None if unknown.
+
+    Checks for the manifest before loading it: load_host exits the process on a
+    missing file rather than raising, which is right for a CLI and wrong to
+    call speculatively. A host with an interface but no manifest renders
+    nothing, so there is no artifact to look for.
+    """
+    if not (ROOT / "hosts" / ("%s.json" % host)).is_file():
+        return None
+    manifest = render_agents.load_host(host)
+    extension = ".toml" if manifest["format"] == "toml" else ".md"
+    return ROOT / manifest["bundled_dir"] / (role["id"] + extension)
 
 
 # Concept -> the field names a host might spell it with. The interface file

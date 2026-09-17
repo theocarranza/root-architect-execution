@@ -22,9 +22,10 @@ Sequencing status, against the five phases below:
 3. The root agent as a main-thread agent — **research done 2026-09-17**,
    build not started. The research replaced the decision it was meant to
    confirm (see D11) and surfaced the nesting cap, resolved as D12.
-4. Orchestrator, workers, mailbox — **not started**, unblocked 2026-09-17 by
-   D12 (the nesting cap is raised to 2 as an install prerequisite, verified by
-   A/B probe before adoption).
+4. Orchestrator, workers, mailbox — **in progress**. The mailbox is built and
+   its four properties are enforced and mutation-tested. The orchestrator role
+   exists, renders, and registers on the host. Still to build: the job queue the
+   orchestrator drives, and root itself (D10, D11).
 5. `thermos-claude` disposition — **done**: PR #1 closed unmerged, 2026-09-17.
 
 ## Context

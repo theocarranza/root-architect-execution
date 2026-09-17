@@ -199,9 +199,17 @@ class RoleAndHostManifestTests(unittest.TestCase):
                 self.assertIn(role["mutation"],
                               ("read-only", "read-and-run", "write-scoped"))
 
-    def test_no_role_may_delegate(self):
+    def test_only_the_orchestrator_may_delegate(self):
+        """Was "no role may delegate", which was true until one had to.
+
+        Kept as a positive statement of the rule rather than deleted: delegation
+        being exactly one role's is the property worth guarding, and a test that
+        merely disappeared would have guarded nothing.
+        """
         for _, role in render_agents.load_roles():
-            self.assertNotIn("delegate", role["tools"]["allow"], role["id"])
+            with self.subTest(role=role["id"]):
+                self.assertEqual("delegate" in role["tools"]["allow"],
+                                 role["kind"] == "orchestrator", role["id"])
 
     def test_read_only_role_granting_a_shell_fails_the_gate(self):
         """The contradiction the JSON Schema cannot see: both halves are valid."""
@@ -322,7 +330,10 @@ class RenderTests(unittest.TestCase):
                     (target / ".root-architect-execution-codex.json").write_text(
                         payload, encoding="utf-8")
                     _, names = install_codex.materialize(target, ROOT)
-                    self.assertEqual(len(names), 3)
+                    expected = sum(
+                        1 for _, role in render_agents.load_roles()
+                        if render_agents.role_targets_host(role, "codex")[0])
+                    self.assertEqual(len(names), expected)
 
     def test_codex_install_still_removes_a_file_it_owns(self):
         """The hardening must not turn the cleanup into a no-op."""
@@ -598,19 +609,32 @@ class RenderTests(unittest.TestCase):
                 body = text.split("## Enforcement", 1)[1]
                 negative, _, positive = body.partition(
                     "What this host **does** enforce")
-                self.assertIn("ask-owner", positive)
-                self.assertIn("spawn-agents", positive)
-                self.assertNotIn("ask-owner", negative)
-                self.assertNotIn("spawn-agents", negative)
+                # Assert over what the renderer DERIVES rather than a fixed
+                # pair of names. spawn-agents is enforced only for a role that
+                # holds no delegation, so hardcoding it made this test fail the
+                # moment a delegating role existed - and it would have been
+                # wrong to "fix" that by asserting it of the orchestrator too.
+                enforced = render_agents.enforced_prohibitions(role, host)
+                self.assertIn("ask-owner", enforced,
+                              "every role should have at least this one enforced")
+                for name in enforced:
+                    self.assertIn(name, positive)
+                    self.assertNotIn(name, negative)
 
     def test_generated_agents_state_the_enforcement_on_disk(self):
         """Guards the committed artifacts, not the code path above."""
-        for name in ("impl-executor", "spec-validator", "quality-validator"):
-            with self.subTest(agent=name):
-                text = (ROOT / "agents" / (name + ".md")).read_text(encoding="utf-8")
+        for path in sorted((ROOT / "agents").glob("*.md")):
+            with self.subTest(agent=path.stem):
+                text = path.read_text(encoding="utf-8")
                 self.assertIn("What this host **does** enforce", text)
-                self.assertIn("**ask-owner**", text)
-                self.assertIn("**spawn-agents**", text)
+                # Derived per role rather than a fixed pair: spawn-agents is
+                # enforced only where the role holds no delegation, so the
+                # orchestrator legitimately lacks it.
+                role = next(r for _, r in render_agents.load_roles()
+                            if r["id"] == path.stem)
+                host = render_agents.load_host("claude-code")
+                for name in render_agents.enforced_prohibitions(role, host):
+                    self.assertIn("**%s**" % name, text)
 
 class AdapterBuildTests(unittest.TestCase):
     """ADR 0001 step 2: the bundle gate, which had to exist before step 3.
@@ -1930,6 +1954,137 @@ class WorkerGitGuardTests(unittest.TestCase):
                 self.assertNotIn("Traceback", result.stderr)
 
 
+class OrchestratorRoleTests(unittest.TestCase):
+    """The kind discriminator, and the invariants it exists to keep.
+
+    Adding a fourth agent must not weaken "the loop is a fixed three-agent
+    architecture". These tests check that it did not.
+    """
+
+    def setUp(self):
+        self.scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.scratch, ignore_errors=True)
+
+    def sandbox(self):
+        dest = self.scratch / "tree"
+        shutil.copytree(ROOT, dest, ignore=shutil.ignore_patterns(
+            ".git", "__pycache__", "*.pyc", "dist"))
+        return dest
+
+    def gate(self, root=None):
+        return subprocess.run(
+            [sys.executable, str((root or ROOT) / "scripts/validate_roles.py")],
+            capture_output=True, text=True, cwd=str(root or ROOT))
+
+    def roles(self):
+        return {f: r for f, r in render_agents.load_roles()}
+
+    def test_every_manifest_declares_its_kind(self):
+        for role_file, role in self.roles().items():
+            with self.subTest(role=role_file):
+                self.assertIn(role["kind"], ("worker", "orchestrator"))
+
+    def test_exactly_three_workers_and_one_orchestrator(self):
+        kinds = [r["kind"] for r in self.roles().values()]
+        self.assertEqual(kinds.count("worker"), 3)
+        self.assertEqual(kinds.count("orchestrator"), 1)
+
+    def test_only_the_orchestrator_delegates(self):
+        for role_file, role in self.roles().items():
+            with self.subTest(role=role_file):
+                delegates = "delegate" in role["tools"]["allow"]
+                self.assertEqual(delegates, role["kind"] == "orchestrator",
+                                 "delegation must be the orchestrator's alone")
+
+    def test_the_orchestrator_cannot_touch_source(self):
+        """It dispatches work; it does not do it."""
+        role = self.roles()["orchestrator.json"]
+        for intent in ("edit-files", "create-files"):
+            self.assertNotIn(intent, role["tools"]["allow"])
+        for prohibition in ("commit", "stage", "plan-work", "ask-owner"):
+            self.assertIn(prohibition, role["must_not"])
+
+    def test_a_fourth_worker_is_still_refused(self):
+        """The invariant the discriminator had to preserve."""
+        tree = self.sandbox()
+        extra = json.loads((tree / "roles/impl-executor.json").read_text())
+        extra["id"] = "second-implementer"
+        (tree / "roles/second-implementer.json").write_text(json.dumps(extra, indent=2))
+
+        result = self.gate(tree)
+        self.assertEqual(result.returncode, 1,
+                         "a fourth worker manifest passed the gate")
+        self.assertIn("fixed three-agent", result.stdout + result.stderr)
+
+    def test_a_second_orchestrator_is_refused(self):
+        """A run has one dispatcher or it has no boundary."""
+        tree = self.sandbox()
+        extra = json.loads((tree / "roles/orchestrator.json").read_text())
+        extra["id"] = "second-orchestrator"
+        (tree / "roles/second-orchestrator.json").write_text(json.dumps(extra, indent=2))
+
+        result = self.gate(tree)
+        self.assertEqual(result.returncode, 1)
+
+    def test_a_worker_granted_delegation_is_refused(self):
+        tree = self.sandbox()
+        path = tree / "roles/impl-executor.json"
+        role = json.loads(path.read_text())
+        role["tools"]["allow"].append("delegate")
+        role["tools"]["deny"] = [d for d in role["tools"]["deny"] if d != "delegate"]
+        path.write_text(json.dumps(role, indent=2))
+
+        result = self.gate(tree)
+        self.assertEqual(result.returncode, 1,
+                         "a worker was granted delegation and the gate allowed it")
+        self.assertIn("only the orchestrator dispatches",
+                      result.stdout + result.stderr)
+
+    def test_an_orchestrator_without_delegation_is_refused(self):
+        """It would have nothing to orchestrate.
+
+        Asserts the rule's own message, not merely a non-zero exit. Stripping
+        delegation also trips the not-generated check, so an exit-code-only
+        assertion passed whether or not this rule existed - which mutation
+        testing caught.
+        """
+        tree = self.sandbox()
+        path = tree / "roles/orchestrator.json"
+        role = json.loads(path.read_text())
+        role["tools"]["allow"] = [t for t in role["tools"]["allow"] if t != "delegate"]
+        path.write_text(json.dumps(role, indent=2))
+
+        result = self.gate(tree)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("would have nothing to orchestrate",
+                      result.stdout + result.stderr)
+
+    def test_the_unenforceable_delegation_scope_is_disclosed(self):
+        """Agent(type) binds only for the main thread; the orchestrator is not.
+
+        Leaving this undisclosed would let the grant imply a restriction the
+        host does not apply - the exact shape of failure this repository keeps
+        closing.
+        """
+        # The generator, not only the artifact. An earlier version of this
+        # test read the committed file alone, so deleting the disclosure from
+        # render_agents.py left it passing - it was guarding the output of a
+        # build nobody had re-run.
+        host = render_agents.load_host("claude-code")
+        role = next(r for _, r in render_agents.load_roles()
+                    if r["kind"] == "orchestrator")
+        notes = " ".join(render_agents.disclosures(
+            role, host, render_agents.resolve_tools(role, host)[2]))
+        self.assertIn("Which agents you may dispatch is **not enforced**", notes)
+
+        generated = (ROOT / "agents/orchestrator.md").read_text(encoding="utf-8")
+        self.assertIn("Which agents you may dispatch is **not enforced**", generated)
+
+        worker = (ROOT / "agents/impl-executor.md").read_text(encoding="utf-8")
+        self.assertNotIn("Which agents you may dispatch", worker,
+                         "a worker holds no delegation, so the disclosure is noise there")
+
+
 class MailboxTests(unittest.TestCase):
     """The four properties the mailbox exists to make true.
 
@@ -2134,27 +2289,54 @@ class AgentInterfaceTests(unittest.TestCase):
 
     # --- mutation: each of these must FAIL the gate -----------------------
 
-    def test_gate_rejects_a_role_depending_on_unsourced_nesting(self):
-        """The finding this whole gate exists for.
+    def test_a_capability_going_unsourced_condemns_the_agent_already_shipped(self):
+        """The finding this gate exists for, moved to where it still bites.
 
-        Cursor's nested delegation is unsourced. A role that requires nesting
-        must be refused there rather than rendered as a guarantee.
+        It used to grant a worker `delegate` and expect a failure on cursor.
+        Once render_agents learned to refuse a delegating role on a host whose
+        nesting is unsourced, that pair stopped being built at all - and a test
+        asserting a complaint about a combination that no longer exists would
+        have passed while proving nothing.
+
+        This is the case that stayed dangerous, and it is not hypothetical: the
+        nesting cap is remotely defaulted, so the re-test protocol can downgrade
+        claude-code's nesting to unsourced on any given day. When it does, the
+        orchestrator file already on disk becomes an artifact resting on an
+        assumption. The gate must condemn it rather than let the downgrade pass
+        as a documentation change.
         """
         tree = self.sandbox()
-        role = tree / "roles/impl-executor.json"
-        document = json.loads(role.read_text(encoding="utf-8"))
-        document["tools"]["allow"].append("delegate")
-        document["tools"]["deny"] = [d for d in document["tools"]["deny"]
-                                     if d != "delegate"]
-        document["must_not"] = [m for m in document["must_not"]
-                                if m != "spawn-agents"]
-        role.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        path = tree / "adapters/claude-code/agent-interface.json"
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["delegation"]["nested"]["provenance"] = {
+            "level": "unsourced",
+            "caveat": "forced unsourced by a test",
+        }
+        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        self.assertTrue((tree / "agents/orchestrator.md").exists(),
+                        "fixture broken: the built artifact this test attacks is gone")
 
         result = self.run_gate(tree)
         self.assertEqual(result.returncode, 1,
-                         "a role requiring nested delegation passed against a "
-                         "host where nesting is UNSOURCED")
-        self.assertIn("UNSOURCED", result.stderr)
+                         "a generated agent kept resting on unsourced nesting")
+        self.assertIn("orchestrator.md", result.stderr)
+        self.assertIn("unsourced", result.stderr.lower())
+
+    def test_gate_rejects_a_leftover_artifact_for_a_host_that_cannot_carry_it(self):
+        """The drift the narrower scope opened up.
+
+        A file left behind from when a role DID target a host is worse than a
+        missing one: it looks generated and current.
+        """
+        tree = self.sandbox()
+        stale = tree / "dist/cursor"
+        stale.mkdir(parents=True, exist_ok=True)
+        (stale / "orchestrator.md").write_text("stale\n", encoding="utf-8")
+
+        result = self.run_gate(tree)
+        self.assertEqual(result.returncode, 1,
+                         "a leftover agent file for an unsupported host passed")
+        self.assertIn("leftover", result.stderr)
 
     def test_gate_rejects_drift_between_interface_and_host_manifest(self):
         """The renderer trusts the manifest; the interface describes the host.

@@ -117,6 +117,41 @@ def toml_basic(text):
     return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def role_targets_host(role, host_name):
+    """Whether this role may be generated for this host at all.
+
+    Derived from adapters/<host>/agent-interface.json rather than declared on
+    the role, so it tracks what the host was last measured to do. A role that
+    delegates needs NESTED delegation - it is itself dispatched, so it would be
+    a spawned agent spawning - and a host whose nesting is unsourced may not
+    carry it. Generating one anyway would ship an agent that cannot do the one
+    thing it exists for, on the strength of an assumption.
+
+    Returns (True, None) or (False, reason).
+    """
+    if "delegate" not in role["tools"]["allow"]:
+        return True, None
+
+    interface_path = ROOT / "adapters" / host_name / "agent-interface.json"
+    if not interface_path.is_file():
+        return False, ("no agent-interface.json for %s, so whether it can nest "
+                       "delegation is unknown" % host_name)
+    try:
+        interface = json.loads(interface_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, ("%s's agent-interface.json will not load (%s)"
+                       % (host_name, exc))
+
+    nested = interface.get("delegation", {}).get("nested", {})
+    level = (nested.get("provenance") or {}).get("level")
+    if level in (None, "unsourced"):
+        return False, ("nested delegation is unsourced on %s; a delegating "
+                       "role may not be built against an assumption" % host_name)
+    if not nested.get("supported"):
+        return False, "%s cannot nest delegation" % host_name
+    return True, None
+
+
 def resolve_tools(role, host):
     """Map portable intents to host tool names, collecting what cannot map."""
     tool_map = host["tool_map"]
@@ -221,6 +256,19 @@ def disclosures(role, host, unmappable):
             "Per-agent hooks are unavailable on this host, so the prohibitions "
             "stated above rely on session-wide hooks or on the agent's own "
             "compliance.")
+    # An agent that delegates can be told WHICH types to delegate to, but on a
+    # host where that restriction binds only for the main thread it does not
+    # bind here - a dispatched agent's type list is ignored. Root gets the
+    # enforced version of this and the orchestrator does not, which is an
+    # asymmetry worth stating rather than letting the grant imply otherwise.
+    if "delegate" in role["tools"]["allow"] and host["host"] == "claude-code":
+        out.append(
+            "Which agents you may dispatch is **not enforced**. This host's "
+            "Agent(type) restriction binds only for an agent running as the "
+            "main thread, and you are dispatched, so the type list is ignored "
+            "for you. Your grant is delegation to anything the session offers; "
+            "dispatching only the worker roles is your obligation, not the "
+            "host's guarantee.")
     return out
 
 
@@ -399,10 +447,21 @@ def main(argv=None):
     extension = ".toml" if host["format"] == "toml" else ".md"
     render = render_toml if host["format"] == "toml" else render_markdown_yaml
 
-    drifted, written = [], []
+    drifted, written, skipped, stale = [], [], [], []
     for role_file, role in load_roles():
-        content = render(role, host, role_file)
         target = out_dir / (role["id"] + extension)
+        allowed, reason = role_targets_host(role, args.host)
+        if not allowed:
+            skipped.append((role["id"], reason))
+            # A file left behind from when the role DID target this host is
+            # worse than a missing one: it looks generated and current.
+            if target.exists():
+                if args.check:
+                    stale.append((str(target), reason))
+                else:
+                    target.unlink()
+            continue
+        content = render(role, host, role_file)
         if args.check:
             current = target.read_text(encoding="utf-8") if target.exists() else None
             if current != content:
@@ -413,19 +472,26 @@ def main(argv=None):
         written.append(str(target))
 
     if args.check:
-        if drifted:
+        if drifted or stale:
             print("out of sync with roles/ and hosts/%s.json:" % args.host,
                   file=sys.stderr)
             for path in drifted:
                 print("  %s" % path, file=sys.stderr)
+            for path, reason in stale:
+                print("  %s should not exist: %s" % (path, reason),
+                      file=sys.stderr)
             print("run: render_agents.py --host %s" % args.host, file=sys.stderr)
             return 1
         print("in sync: %s agent files match roles/ and hosts/%s.json"
-              % (len(load_roles()), args.host))
+              % (len(load_roles()) - len(skipped), args.host))
+        for role_id, reason in skipped:
+            print("  not built for this host: %s - %s" % (role_id, reason))
         return 0
 
     for path in written:
         print("wrote %s" % path)
+    for role_id, reason in skipped:
+        print("skipped %s: %s" % (role_id, reason))
     return 0
 
 
