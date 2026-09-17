@@ -1,0 +1,286 @@
+{
+  "host": "claude-code",
+  "retrieved": "2026-09-17",
+  "definition": {
+    "format": "markdown-yaml",
+    "locations": [
+      "agents/<name>.md",
+      ".claude/agents/<name>.md"
+    ],
+    "provenance": {
+      "level": "first-party-doc",
+      "source": "https://code.claude.com/docs/en/plugins-reference",
+      "retrieved": "2026-09-17",
+      "quote": "Claude Code names the agent after the file, so agents/reviewer.md in a plugin named my-plugin loads as my-plugin:reviewer"
+    }
+  },
+  "fields": {
+    "name": {
+      "supported": true,
+      "type": "string",
+      "semantics": "Unique identifier, lowercase and hyphens. Cannot contain ':' - that separator is reserved for plugin scoping.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "Names cannot contain ':' (reserved for plugin-scoped identifiers)"
+      }
+    },
+    "description": {
+      "supported": true,
+      "type": "string",
+      "semantics": "Determines when Claude delegates to this subagent.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "No default; determines when Claude delegates to this subagent"
+      }
+    },
+    "tools": {
+      "supported": true,
+      "type": "list",
+      "default": "Inherits every tool available to subagents.",
+      "semantics": "An allowlist. Resolved AFTER disallowedTools against whatever that leaves. Accepts MCP server patterns mcp__<server> and mcp__<server>__*, which span the whole server including its write tools. Agent(type) restricts which subagent types may be spawned, but the parenthesised list binds only for an agent running as the main thread; in a subagent definition it is ignored.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "Inherits every tool available to subagents if omitted.",
+        "caveat": "If no entry in the list resolves to a tool the subagent usually fails to launch - but a list where SOME entries resolve launches fine, so a dead MCP pattern is silent."
+      }
+    },
+    "disallowedTools": {
+      "supported": true,
+      "type": "list",
+      "default": "No tools are removed.",
+      "semantics": "A denylist, applied FIRST; tools is then resolved against the remaining pool. An entry carrying a specifier removes the whole tool, not only the matching invocations - so Bash(git push *) here removes Bash entirely, and a later attempt to grant Bash(git show:*) through tools resolves to nothing.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "A disallowedTools entry with a specifier, such as Bash(git push *), still removes the whole tool from the subagent, not only the matching commands."
+      }
+    },
+    "model": {
+      "supported": true,
+      "type": "string",
+      "semantics": "Resolution order is per-invocation parameter, then frontmatter, then CLAUDE_CODE_SUBAGENT_MODEL, then the main conversation's model. An unset field therefore inherits, and a per-invocation argument overrides the frontmatter - so a frontmatter model is a default, not a pin.",
+      "values": [
+        "sonnet",
+        "opus",
+        "haiku",
+        "fable",
+        "inherit"
+      ],
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "Follows the subagent model order: per-invocation parameter, frontmatter, CLAUDE_CODE_SUBAGENT_MODEL, main conversation's model",
+        "caveat": "A full model id is also accepted; the enum here lists the aliases only."
+      }
+    },
+    "effort": {
+      "supported": true,
+      "type": "enum",
+      "values": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "Inherits session effort level.",
+      "semantics": "Available levels depend on the model.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "Inherits session effort level; available levels depend on model"
+      }
+    },
+    "skills": {
+      "supported": true,
+      "type": "list",
+      "default": "No skills preloaded.",
+      "semantics": "Preloads named skills into context at startup. Preloading turns a rubric from a tool call that can fail into a startup invariant; the subagent can still invoke skills via the Skill tool regardless.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "No skills preloaded if omitted; subagent can still invoke skills via Skill tool during execution"
+      }
+    },
+    "maxTurns": {
+      "supported": true,
+      "type": "integer",
+      "default": "No limit.",
+      "semantics": "On reaching the limit the subagent stops and its output is marked partial.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "No limit if omitted; when reached, subagent stops and Claude Code marks output as partial"
+      }
+    },
+    "memory": {
+      "supported": true,
+      "type": "enum",
+      "values": [
+        "user",
+        "project",
+        "local"
+      ],
+      "default": "No persistent memory.",
+      "semantics": "Persistent recall across dispatches.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "No persistent memory if omitted"
+      }
+    },
+    "isolation": {
+      "supported": true,
+      "type": "enum",
+      "values": [
+        "worktree"
+      ],
+      "default": "No isolation.",
+      "semantics": "Runs the subagent in a temporary git worktree. Chosen in the definition, not per invocation.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "No isolation if omitted; set to worktree to run subagent in temporary git worktree"
+      }
+    },
+    "background": {
+      "supported": true,
+      "type": "boolean",
+      "default": "false",
+      "semantics": "Keeps the subagent in the background always.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "set true to keep subagent in background always"
+      }
+    },
+    "omitClaudeMd": {
+      "supported": true,
+      "type": "boolean",
+      "default": "false - loads user, project and local CLAUDE.md.",
+      "semantics": "Skips user, project and local CLAUDE.md; managed policy files still load. Ignored when the agent runs as main session via --agent. Requires v2.1.271+.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "set true to skip user, project, and local CLAUDE.md (managed policy files still load). Ignored when agent runs as main session via --agent or agent setting. Requires v2.1.271+",
+        "caveat": "The doc states this is ignored for a main-session agent, which is the mode the root architect runs in. ADR 0003 D10 therefore cannot rely on it for root; it applies to dispatched workers only."
+      }
+    },
+    "initialPrompt": {
+      "supported": true,
+      "type": "string",
+      "default": "No auto-submission.",
+      "semantics": "Only used when the agent runs as main session via --agent or the agent setting.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/sub-agents",
+        "retrieved": "2026-09-17",
+        "quote": "No auto-submission if omitted; only used when agent runs as main session via --agent or agent setting"
+      }
+    },
+    "permissionMode": {
+      "supported": false,
+      "type": "enum",
+      "semantics": "Supported for ordinary agent definitions but NOT for plugin-shipped agents, which is how this project ships.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/plugins-reference",
+        "retrieved": "2026-09-17",
+        "quote": "For security reasons, plugin-shipped agents don't support hooks, mcpServers, or permissionMode."
+      }
+    },
+    "hooks": {
+      "supported": false,
+      "semantics": "Not supported for plugin-shipped agents. See ADR 0002.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/plugins-reference",
+        "retrieved": "2026-09-17",
+        "quote": "For security reasons, plugin-shipped agents don't support hooks, mcpServers, or permissionMode."
+      }
+    },
+    "mcpServers": {
+      "supported": false,
+      "semantics": "Not supported for plugin-shipped agents.",
+      "provenance": {
+        "level": "first-party-doc",
+        "source": "https://code.claude.com/docs/en/plugins-reference",
+        "retrieved": "2026-09-17",
+        "quote": "For security reasons, plugin-shipped agents don't support hooks, mcpServers, or permissionMode."
+      }
+    },
+    "main_thread_self_detection": {
+      "supported": false,
+      "semantics": "Whether a running agent can observe that it is or is not the main thread. It cannot, by any means this project could find or measure. Environment is not it: a dispatched subagent's environment was captured and is byte-identical to its parent's - all 49 CLAUDE_*/ANTHROPIC_* variables present with identical values, including CLAUDE_CODE_SESSION_ID. The host does track this internally (agentDepth is threaded through the binary's tool-filter function alongside agentType and permissionMode, and spawnDepth is recorded per task) but does not surface it to the agent. What IS observable is the consequence: an agent whose definition grants a tool can check whether that tool is actually present in its toolset. That is the basis for a fail-closed check that does not require knowing one's own depth.",
+      "provenance": {
+        "level": "empirically-verified",
+        "source": "probe run 2026-09-17: parent and dispatched-subagent environments captured and diffed; binary strings at /opt/claude-code/bin/claude inspected",
+        "retrieved": "2026-09-17",
+        "quote": "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1",
+        "caveat": "A verified negative for environment variables specifically, plus absence from the sub-agent and plugin references. Not proof that no mechanism exists anywhere in the host - an undocumented API or a hook payload field could still carry it."
+      }
+    },
+    "hook_agent_identity": {
+      "supported": true,
+      "type": "string",
+      "semantics": "What a PreToolUse hook receives as agent_type. Carried by an agent HAVING an identity, not by it being a subagent: a dispatched subagent reports agent_type and agent_id; an agent launched as its own process with --agent reports agent_type and no agent_id; an ordinary main session with no --agent reports neither. A plugin agent reports its namespaced name, which role_for()'s rsplit(':', 1)[-1] resolves to the same role either way. Identity-aware guards therefore keep working when a worker is launched as a process rather than dispatched as a subagent - which is what makes script dispatch viable.",
+      "provenance": {
+        "level": "empirically-verified",
+        "source": "probe run 2026-09-17: a logging PreToolUse hook in a throwaway workspace across four launch shapes (main session, dispatched subagent, --agent with a project agent, --agent with an installed plugin agent)",
+        "retrieved": "2026-09-17",
+        "quote": "{\"agent_type\": \"thermos-claude:thermo-nuclear-review-subagent\", \"tool_name\": \"Read\", ...}",
+        "caveat": "Measured with a PROJECT-level hook. Whether a plugin-shipped hooks.json registers in a --agent process was not measured, though smoke_install.py establishes that plugin hooks register in an ordinary session and a --agent process is one."
+      }
+    }
+  },
+  "delegation": {
+    "supported": true,
+    "mechanism": "The Agent tool present in the agent's tools allowlist.",
+    "nested": {
+      "supported": true,
+      "gate": "Two conditions, both necessary. (1) Agent present in the dispatched agent's own tools allowlist. (2) CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH high enough to reach that depth - at the cap the Agent tool is withheld from the subagent's toolset entirely rather than offered and refused.",
+      "max_depth": null,
+      "provenance": {
+        "level": "empirically-verified",
+        "source": "A/B probe, 2026-09-17: two fresh `claude -p` processes differing only in CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, each asked to dispatch a subagent that reports whether it holds the Agent tool",
+        "retrieved": "2026-09-17",
+        "quote": "cap=2 -> HAVE_AGENT; cap=1 -> NO_AGENT",
+        "caveat": "Nesting works and the environment variable is what controls it - both directions measured, not inferred from one. But the variable's DEFAULT is a remotely-controlled feature value (maxSubagentSpawnDepthFromGrowthBook, integer >= 1), so absent an explicit setting this capability is not under local control and can change with no local change at all. The value must be read at process start: exporting it into a running session does nothing, which is why the probe launched fresh processes. max_depth is null because there is no host constant to record - only whatever the environment is currently configured to allow."
+      }
+    },
+    "provenance": {
+      "level": "first-party-doc",
+      "source": "https://code.claude.com/docs/en/sub-agents",
+      "retrieved": "2026-09-17",
+      "quote": "Use Agent(agent_type) syntax to restrict which subagent types can be spawned",
+      "caveat": "The parenthesised type list binds only for an agent running as the main thread with claude --agent. In subagent definitions the list is ignored - so root must be a main-thread agent for the restriction to be real."
+    }
+  },
+  "mailbox": {
+    "supported": false,
+    "mechanism": null,
+    "provenance": {
+      "level": "unsourced",
+      "caveat": "No inter-agent message primitive was found for plugin-shipped agents in either reference. Recorded as unsourced rather than false: this project has not demonstrated absence, only failed to find one. A portable envelope supplies it either way."
+    }
+  },
+  "notes": [
+    "Field-level contract with fuller commentary: AI_Codex/Knowledge/Claude Code Subagent Contract.md",
+    "The tools/disallowedTools resolution order is the single most consequential entry in this file. It was argued about across two review sessions and four reviewer passes before anybody read it."
+  ]
+}

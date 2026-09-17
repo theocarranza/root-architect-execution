@@ -30,6 +30,7 @@ import smoke_install  # noqa: E402
 import validate_interfaces  # noqa: E402
 import mailbox  # noqa: E402
 import job_queue  # noqa: E402
+import root_preflight  # noqa: E402
 
 
 @contextlib.contextmanager
@@ -210,7 +211,8 @@ class RoleAndHostManifestTests(unittest.TestCase):
         for _, role in render_agents.load_roles():
             with self.subTest(role=role["id"]):
                 self.assertEqual("delegate" in role["tools"]["allow"],
-                                 role["kind"] == "orchestrator", role["id"])
+                                 role["kind"] in ("orchestrator", "root"),
+                                 role["id"])
 
     def test_read_only_role_granting_a_shell_fails_the_gate(self):
         """The contradiction the JSON Schema cannot see: both halves are valid."""
@@ -552,11 +554,20 @@ class RenderTests(unittest.TestCase):
         the declaration has to carry its own provenance.
         """
         host = render_agents.load_host("claude-code")
+        declared = 0
         for _role_file, role in render_agents.load_roles():
+            # Scoped to roles that DECLARE it. Root is the operator channel, so
+            # it declares no such prohibition and nothing should claim one is
+            # enforced on it - asserting this of every role would have demanded
+            # exactly that false claim.
+            if "ask-owner" not in role["must_not"]:
+                continue
+            declared += 1
             with self.subTest(role=role["id"]):
                 found = render_agents.enforced_prohibitions(role, host)
                 self.assertIn("ask-owner", found)
                 self.assertTrue(found["ask-owner"].strip())
+        self.assertEqual(declared, 4, "every dispatched agent declares it")
 
     def test_spawn_agents_enforcement_is_derived_not_declared(self):
         """Derived from the grant, so it cannot drift away from the truth.
@@ -616,8 +627,9 @@ class RenderTests(unittest.TestCase):
                 # moment a delegating role existed - and it would have been
                 # wrong to "fix" that by asserting it of the orchestrator too.
                 enforced = render_agents.enforced_prohibitions(role, host)
-                self.assertIn("ask-owner", enforced,
-                              "every role should have at least this one enforced")
+                if "ask-owner" in role["must_not"]:
+                    self.assertIn("ask-owner", enforced,
+                                  "a role declaring it should have it enforced")
                 for name in enforced:
                     self.assertIn(name, positive)
                     self.assertNotIn(name, negative)
@@ -1983,19 +1995,27 @@ class OrchestratorRoleTests(unittest.TestCase):
     def test_every_manifest_declares_its_kind(self):
         for role_file, role in self.roles().items():
             with self.subTest(role=role_file):
-                self.assertIn(role["kind"], ("worker", "orchestrator"))
+                self.assertIn(role["kind"], ("worker", "orchestrator", "root"))
 
     def test_exactly_three_workers_and_one_orchestrator(self):
         kinds = [r["kind"] for r in self.roles().values()]
         self.assertEqual(kinds.count("worker"), 3)
         self.assertEqual(kinds.count("orchestrator"), 1)
 
-    def test_only_the_orchestrator_delegates(self):
+    def test_no_worker_delegates(self):
+        """Delegation belongs to the two agents that dispatch, and to no worker.
+
+        Was "the orchestrator's alone", which stopped being true when root
+        arrived - root dispatches the orchestrator. The property that actually
+        matters survives the change: a worker never dispatches anything, so
+        work cannot reach a worker except through the orchestrator.
+        """
         for role_file, role in self.roles().items():
             with self.subTest(role=role_file):
                 delegates = "delegate" in role["tools"]["allow"]
-                self.assertEqual(delegates, role["kind"] == "orchestrator",
-                                 "delegation must be the orchestrator's alone")
+                self.assertEqual(delegates,
+                                 role["kind"] in ("orchestrator", "root"),
+                                 "only the dispatchers hold delegation")
 
     def test_the_orchestrator_cannot_touch_source(self):
         """It dispatches work; it does not do it."""
@@ -2227,6 +2247,22 @@ class JobQueueTests(unittest.TestCase):
         self.workspace = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.workspace, ignore_errors=True)
         self.ws = str(self.workspace)
+        self.preflight()
+
+    def preflight(self, run_id=None, passed=True):
+        """Put a startup-check record on file, because init now demands one.
+
+        Written directly rather than by running root_preflight: these tests are
+        about the queue, and the check's own behaviour is PreflightTests'
+        subject. What this does assert, by existing at all, is that a run
+        cannot be queued without it - remove this and every test below fails.
+        """
+        path = (self.workspace / ".root-architect" / "preflight"
+                / ("%s.json" % (run_id or self.RUN)))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"run_id": run_id or self.RUN,
+                                    "passed": passed, "refusals": []}) + "\n")
+        return path
 
     def seed(self, tasks=None):
         tasks = tasks or [
@@ -2542,3 +2578,405 @@ class AgentInterfaceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RootAgentTests(unittest.TestCase):
+    """Root as a main-thread agent, and the rules that keep that claim true.
+
+    ADR 0003 D10. Root's isolation from the workers is one line of frontmatter
+    - a dispatch scope the host enforces - so everything that produces that
+    line is worth a test, and so is every way of producing it that would be a
+    lie.
+    """
+
+    def setUp(self):
+        self.scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.scratch, ignore_errors=True)
+        self.host = render_agents.load_host("claude-code")
+        self.root = next(r for _f, r in render_agents.load_roles()
+                         if r["kind"] == "root")
+
+    def sandbox(self):
+        """A throwaway copy. Numbered, because two per test is normal here -
+        a rule usually has a violating half and a control half.
+        """
+        dest = self.scratch / ("tree%d" % len(list(self.scratch.iterdir())))
+        shutil.copytree(ROOT, dest, ignore=shutil.ignore_patterns(
+            ".git", "__pycache__", "*.pyc", "dist"))
+        return dest
+
+    def gate(self, root):
+        return subprocess.run(
+            [sys.executable, str(root / "scripts/validate_roles.py")],
+            capture_output=True, text=True, cwd=str(root))
+
+    # --- dispatched or not, which decides what the host must support -------
+
+    def test_root_is_the_only_agent_nobody_dispatches(self):
+        for _f, role in render_agents.load_roles():
+            with self.subTest(role=role["id"]):
+                self.assertEqual(render_agents.is_dispatched(role),
+                                 role["kind"] != "root")
+
+    def test_root_does_not_need_nested_delegation(self):
+        """The distinction that decides which hosts can carry root.
+
+        A dispatched delegator needs NESTED delegation; root needs only
+        delegation, because nothing spawned root. Cursor is the case that
+        separates them: its nesting is unsourced, so the orchestrator may not
+        be built there - and root's eligibility must not inherit that refusal.
+        """
+        orchestrator = next(r for _f, r in render_agents.load_roles()
+                            if r["kind"] == "orchestrator")
+        built, reason = render_agents.role_targets_host(orchestrator, "cursor")
+        self.assertFalse(built)
+        self.assertIn("nested delegation is unsourced", reason)
+
+        built, reason = render_agents.role_targets_host(self.root, "cursor")
+        self.assertTrue(built, reason)
+
+    def test_root_is_refused_where_plain_delegation_is_unsourced(self):
+        """The other direction: root still rests on something sourced."""
+        tree = self.sandbox()
+        path = tree / "adapters/cursor/agent-interface.json"
+        interface = json.loads(path.read_text())
+        interface["delegation"]["provenance"] = {
+            "level": "unsourced", "caveat": "blanked for this test"}
+        path.write_text(json.dumps(interface, indent=2))
+
+        result = subprocess.run(
+            [sys.executable, str(tree / "scripts/render_agents.py"),
+             "--host", "cursor", "--out", str(self.scratch / "out")],
+            capture_output=True, text=True, cwd=str(tree))
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("skipped root-architect", result.stdout)
+        self.assertIn("delegation is unsourced", result.stdout)
+
+    # --- the scope line itself ---------------------------------------------
+
+    def test_roots_grant_carries_the_host_enforced_scope(self):
+        names, enforced, note = render_agents.delegation_scope(self.root, self.host)
+        self.assertEqual(names, ["Agent(root-architect-execution:orchestrator)"])
+        self.assertTrue(enforced)
+        self.assertIn("Dispatch scope is enforced", note)
+
+        generated = (ROOT / "agents/root-architect.md").read_text(encoding="utf-8")
+        self.assertIn("tools: Read, Grep, Glob, Edit, Write, Bash, "
+                      "Agent(root-architect-execution:orchestrator)", generated)
+
+    def test_the_type_name_follows_the_plugin_manifest(self):
+        """A wrong type name fails silently: it matches no agent at all.
+
+        So it is derived from the plugin manifest rather than written twice. A
+        rename that did not reach root's grant would leave root able to
+        dispatch nothing, with a frontmatter that looks entirely correct.
+        """
+        tree = self.sandbox()
+        manifest = tree / ".claude-plugin/plugin.json"
+        plugin = json.loads(manifest.read_text())
+        plugin["name"] = "renamed-plugin"
+        manifest.write_text(json.dumps(plugin, indent=2))
+
+        result = subprocess.run(
+            [sys.executable, str(tree / "scripts/render_agents.py"),
+             "--host", "claude-code", "--out", str(self.scratch / "out")],
+            capture_output=True, text=True, cwd=str(tree))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = (self.scratch / "out/root-architect.md").read_text(encoding="utf-8")
+        self.assertIn("Agent(renamed-plugin:orchestrator)", text)
+
+    def test_the_same_syntax_is_a_guarantee_for_root_and_not_for_the_orchestrator(self):
+        """The asymmetry the whole main-thread decision turns on.
+
+        Read from the manifest's main_thread_only flag, not from the host's
+        name. It was an `if host == "claude-code"` before root existed, which
+        made the claim true by coincidence.
+        """
+        orchestrator = next(r for _f, r in render_agents.load_roles()
+                            if r["kind"] == "orchestrator")
+        _n, enforced, note = render_agents.delegation_scope(orchestrator, self.host)
+        self.assertFalse(enforced)
+        self.assertIn("Which agents you may dispatch is **not enforced**", note)
+
+        relaxed = json.loads(json.dumps(self.host))
+        relaxed["main_thread"]["delegate_scope"]["main_thread_only"] = False
+        _n, enforced, note = render_agents.delegation_scope(orchestrator, relaxed)
+        self.assertIsNone(note, "nothing to disclose once the scope binds here")
+
+    def test_a_host_that_cannot_name_the_dispatch_tool_says_so(self):
+        """Cursor maps no delegate tool, so root's scope is instruction only."""
+        cursor = render_agents.load_host("cursor")
+        names, enforced, note = render_agents.delegation_scope(self.root, cursor)
+        self.assertEqual(names, [])
+        self.assertFalse(enforced)
+        self.assertIn("maps no tool name to delegation", note)
+
+        generated = (ROOT / "dist/cursor/root-architect.md").read_text(encoding="utf-8")
+        self.assertIn("maps no tool name to delegation", generated)
+
+    # --- the startup prompt -------------------------------------------------
+
+    def test_the_startup_prompt_is_auto_submitted_where_the_host_can(self):
+        generated = (ROOT / "agents/root-architect.md").read_text(encoding="utf-8")
+        self.assertIn("initialPrompt: \"Before anything else", generated)
+        self.assertIn("## Startup", generated)
+
+    def test_a_host_with_no_auto_submission_discloses_it(self):
+        codex = render_agents.load_host("codex")
+        self.assertIsNone(render_agents.main_thread_startup(codex))
+        notes = " ".join(render_agents.disclosures(self.root, codex, []))
+        self.assertIn("does not auto-submit a startup prompt", notes)
+
+        claude = render_agents.main_thread_startup(self.host)
+        self.assertEqual(claude, "initialPrompt")
+        notes = " ".join(render_agents.disclosures(self.root, self.host, []))
+        self.assertNotIn("does not auto-submit", notes)
+
+    def test_the_startup_prompt_is_quoted(self):
+        """Prose in frontmatter, where a colon-space silently changes the parse.
+
+        Every other value the renderer writes comes from a constrained
+        vocabulary. This one is a sentence, and an unquoted sentence containing
+        ": " makes the frontmatter parse as something else - launching root
+        without the check it exists to carry.
+        """
+        tree = self.sandbox()
+        path = tree / "roles/root-architect.json"
+        role = json.loads(path.read_text())
+        role["launch"]["initial_prompt"] = 'note: run "the check" \\ now'
+        path.write_text(json.dumps(role, indent=2))
+
+        result = subprocess.run(
+            [sys.executable, str(tree / "scripts/render_agents.py"),
+             "--host", "claude-code", "--out", str(self.scratch / "out")],
+            capture_output=True, text=True, cwd=str(tree))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        line = next(l for l in (self.scratch / "out/root-architect.md")
+                    .read_text(encoding="utf-8").splitlines()
+                    if l.startswith("initialPrompt:"))
+        self.assertEqual(line,
+                         'initialPrompt: "note: run \\"the check\\" \\\\ now"')
+
+    # --- root returns nothing ----------------------------------------------
+
+    def test_root_is_given_no_return_contract(self):
+        """An agent with nobody above it has no schema to satisfy."""
+        text = render_agents.render_markdown_yaml(
+            self.root, self.host, "root-architect.json")
+        self.assertIn("You return nothing to anybody", text)
+        self.assertNotIn("```json", text)
+
+    # --- the manifest rules validate_roles adds -----------------------------
+
+    def test_launch_is_refused_on_a_dispatched_agent(self):
+        tree = self.sandbox()
+        path = tree / "roles/orchestrator.json"
+        role = json.loads(path.read_text())
+        role["launch"] = {"main_thread": True, "delegates_to": ["implementer"]}
+        path.write_text(json.dumps(role, indent=2))
+
+        result = self.gate(tree)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("only root is launched rather than dispatched",
+                      result.stdout + result.stderr)
+
+    def test_root_may_not_dispatch_a_worker_directly(self):
+        """The topology this architecture exists to prevent, in one field."""
+        tree = self.sandbox()
+        path = tree / "roles/root-architect.json"
+        role = json.loads(path.read_text())
+        role["launch"]["delegates_to"] = ["orchestrator", "implementer"]
+        path.write_text(json.dumps(role, indent=2))
+
+        result = self.gate(tree)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("reaches a worker is the topology",
+                      result.stdout + result.stderr)
+
+    def test_a_scope_naming_an_agent_nobody_ships_is_refused(self):
+        tree = self.sandbox()
+        path = tree / "roles/root-architect.json"
+        role = json.loads(path.read_text())
+        role["launch"]["delegates_to"] = ["supervisor"]
+        path.write_text(json.dumps(role, indent=2))
+
+        result = self.gate(tree)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("which no role manifest fills",
+                      result.stdout + result.stderr)
+
+    def test_the_manifest_and_the_shipped_guard_must_agree(self):
+        """Either half alone is a claim; only together are they a boundary."""
+        tree = self.sandbox()
+        path = tree / "roles/root-architect.json"
+        role = json.loads(path.read_text())
+        role["must_not"] = [m for m in role["must_not"]
+                            if m != "interfere-with-dispatch"]
+        path.write_text(json.dumps(role, indent=2))
+
+        result = self.gate(tree)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("the one prohibition the shipped hook enforces",
+                      result.stdout + result.stderr)
+
+        tree = self.sandbox()
+        (tree / "hooks/root_write_guard.py").unlink()
+        result = self.gate(tree)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("is not there to enforce it", result.stdout + result.stderr)
+
+
+class PreflightTests(unittest.TestCase):
+    """ADR 0003 D11: the check that asks whether the boundary is in force.
+
+    Root supplies the observation and this script supplies the verdict, so
+    every test here is about the verdict. The one thing it cannot check is a
+    root that lies to it, which is stated in the module and not tested because
+    it is not true.
+    """
+
+    RUN = "20260917-pre"
+
+    def setUp(self):
+        self.workspace = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.workspace, ignore_errors=True)
+        self.ws = str(self.workspace)
+
+    def observe(self, tools=("Read", "Grep", "Glob", "Edit", "Write", "Bash", "Agent"),
+                agent_types=("root-architect-execution:orchestrator",), raw=None):
+        path = self.workspace / "observed.json"
+        path.write_text(raw if raw is not None else json.dumps(
+            {"tools": list(tools), "agent_types": list(agent_types)}))
+        return str(path)
+
+    def check(self, **kwargs):
+        return root_preflight.run(self.ws, self.RUN, self.observe(**kwargs))
+
+    # --- what it is derived from -------------------------------------------
+
+    def test_expectations_come_from_the_manifests_not_a_second_list(self):
+        expected = root_preflight.expectations("claude-code")
+        self.assertEqual(expected["delegate_tools"], ["Agent"])
+        self.assertEqual(expected["agent_types"],
+                         ["root-architect-execution:orchestrator"])
+
+    # --- the two questions D11 names ---------------------------------------
+
+    def test_a_sound_session_passes_and_is_recorded(self):
+        record = self.check()
+        self.assertTrue(record["passed"])
+        on_disk = json.loads(root_preflight.record_path(self.ws, self.RUN)
+                             .read_text())
+        self.assertEqual(on_disk["observed"]["agent_types"],
+                         ["root-architect-execution:orchestrator"])
+
+    def test_a_missing_dispatch_tool_is_refused(self):
+        """The depth cap, or a launch that was never a main-thread agent."""
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            self.check(tools=("Read", "Bash"))
+        self.assertIn("dispatch tool is missing", str(caught.exception))
+
+    def test_dispatching_more_than_the_scope_is_refused(self):
+        """The failure the whole check exists for: the restriction did not bind."""
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            self.check(agent_types=("root-architect-execution:orchestrator",
+                                    "general-purpose"))
+        self.assertIn("types you were not granted", str(caught.exception))
+
+    def test_a_scope_that_reaches_nothing_is_refused(self):
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            self.check(agent_types=())
+        self.assertIn("cannot dispatch", str(caught.exception))
+
+    def test_a_refusal_is_recorded_too(self):
+        """A refused run and an unchecked one must not look the same after."""
+        with self.assertRaises(root_preflight.PreflightError):
+            self.check(agent_types=("anything",))
+        record = json.loads(root_preflight.record_path(self.ws, self.RUN)
+                            .read_text())
+        self.assertFalse(record["passed"])
+        self.assertTrue(record["refusals"])
+
+    # --- fails closed -------------------------------------------------------
+
+    def test_an_absent_observation_is_a_failure_not_a_pass(self):
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            root_preflight.run(self.ws, self.RUN, str(self.workspace / "nope.json"))
+        self.assertIn("silence is not a pass", str(caught.exception))
+
+    def test_a_malformed_observation_is_refused(self):
+        for raw in ('{"tools": "Agent", "agent_types": []}',
+                    '{"tools": []}',
+                    '["Agent"]',
+                    'not json at all'):
+            with self.subTest(raw=raw):
+                with self.assertRaises(root_preflight.PreflightError):
+                    root_preflight.run(self.ws, self.RUN, self.observe(raw=raw))
+
+    # --- and what it gates --------------------------------------------------
+
+    def test_a_run_cannot_be_queued_without_a_passing_check(self):
+        """What makes D11 a gate rather than advice."""
+        tasks = [{"name": "t", "worker": "worker:implementer",
+                  "brief": "briefs/t.json"}]
+        with self.assertRaises(job_queue.JobQueueError) as caught:
+            job_queue.init(self.ws, self.RUN, tasks)
+        self.assertIn("no startup check on record", str(caught.exception))
+
+        with self.assertRaises(root_preflight.PreflightError):
+            self.check(tools=("Read",))
+        with self.assertRaises(job_queue.JobQueueError) as caught:
+            job_queue.init(self.ws, self.RUN, tasks)
+        self.assertIn("on record as FAILED", str(caught.exception))
+
+        self.check()
+        self.assertTrue(job_queue.init(self.ws, self.RUN, tasks).exists())
+
+    def test_an_unreadable_record_proves_nothing(self):
+        path = root_preflight.record_path(self.ws, self.RUN)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{ truncated")
+        ok, why = root_preflight.passed(self.ws, self.RUN)
+        self.assertFalse(ok)
+        self.assertIn("will not parse", why)
+
+    def test_the_check_runs_from_an_installed_bundle(self):
+        """The gate has to work where the product runs, not only in the repo.
+
+        roles/, hosts/ and adapters/ looked like development surface and were
+        excluded from the bundle. They are not: three bundled scripts read
+        them, and without them the capability gate the README tells root to run
+        before dispatching reported that no role fills any position - while
+        still exiting 0. A gate that cannot run in the product is worse than
+        no gate, because the protocol goes on saying it ran.
+        """
+        # A copy, not dist/ itself: running these writes __pycache__, and the
+        # bundle is byte-gated against a fresh build. An install is a copy
+        # anyway, so this is also the truer shape of the test.
+        bundle = self.workspace / "installed"
+        shutil.copytree(ROOT / "dist/claude-code", bundle)
+        for script, expected in (("validate_roles.py", "capability gate passed"),
+                                 ("validate_interfaces.py", "interfaces sound")):
+            with self.subTest(script=script):
+                result = subprocess.run(
+                    [sys.executable, str(bundle / "scripts" / script)],
+                    capture_output=True, text=True, cwd=str(bundle))
+                self.assertEqual(result.returncode, 0,
+                                 result.stdout + result.stderr)
+                self.assertIn(expected, result.stdout)
+
+        result = subprocess.run(
+            [sys.executable, str(bundle / "scripts/root_preflight.py"),
+             "--workspace", self.ws, "--run-id", self.RUN,
+             "--observed", self.observe()],
+            capture_output=True, text=True, cwd=str(bundle))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("the boundary holds", result.stdout)
+
+    def test_the_cli_refuses_to_invent_an_observation(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/root_preflight.py"),
+             "--workspace", self.ws, "--run-id", self.RUN],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("it cannot make one", result.stderr)

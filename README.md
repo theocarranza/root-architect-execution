@@ -59,7 +59,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" --host claude-code --ch
 ```
 
 The last two are the capability gate. They are worth running once after install:
-they confirm the three agent roles resolve on this host and that `agents/` still
+they confirm the agent roles resolve on this host and that `agents/` still
 matches `roles/` and `hosts/`, which is the thing the protocol refuses to start
 without.
 
@@ -116,12 +116,41 @@ You do not have to remember this. Root checks the capability at startup and
 refuses to orchestrate without it, so a missing prerequisite stops the run with
 a reason instead of quietly producing an unisolated one.
 
+## Starting a session as root
+
+Root is a **mode, not a command**. There is no slash command that turns an
+ordinary session into a root-architect one, because the boundary root's
+isolation rests on — `Agent(<plugin>:orchestrator)`, restricting root to
+dispatching the orchestrator and nothing else — binds only for an agent running
+as the main thread:
+
+```bash
+CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2 claude --agent root-architect
+```
+
+Launched any other way, that line is ignored and root can dispatch anything.
+The session looks and feels identical, which is the whole problem, so root's
+first act is a startup check:
+
+```bash
+# Root writes down what it can actually see, then has it judged.
+python3 scripts/root_preflight.py --run-id <run-id> --observed observed.json
+```
+
+Root supplies the observation; the script supplies the verdict. `job_queue init`
+refuses a run with no passing record, so skipping the check does not produce a
+run that merely lacks one — it produces no run.
+
+What that check cannot do is catch a root that misreports what it sees. It
+catches every *accidental* way the boundary goes missing, which is every way it
+has actually gone missing.
+
 ## Layout
 
 | Path | What it is |
 | --- | --- |
 | `SKILL.md` | The protocol: architecture, gates, state, per-task loop, stop conditions |
-| `roles/*.json` | The three worker roles — model tier, reasoning strength, tool grant, mutation class |
+| `roles/*.json` | Every agent — the three workers, the orchestrator, and root — as model tier, reasoning strength, tool grant, mutation class |
 | `hosts/*.json` | What each host can actually express, with the date and evidence behind every claim |
 | `agents/*.md` | **Generated.** The Claude Code agent files |
 | `dist/<host>/` | **Generated.** `claude-code/` is a built, byte-gated bundle; `codex/` and `cursor/` are still reference agent copies |
@@ -129,7 +158,7 @@ a reason instead of quietly producing an unisolated one.
 | `references/agents/*.md` | The role prose, written once and pointed at, never copied |
 | `references/contracts.md` | The four shapes the loop passes around |
 | `schemas/*.json` | Real JSON Schemas for roles, hosts, briefs, reports, verdicts, dispatch state |
-| `scripts/` | Capability gate, renderer, return gate, dispatch state |
+| `scripts/` | Capability gate, interface gate, renderer, return gate, dispatch state, mailbox, job queue, startup check |
 | `hooks/` | The two guards |
 | `tests/` | `python3 -m unittest discover -s tests -t .` |
 
@@ -151,7 +180,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/check_return.py" \
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" verify
 ```
 
-When contributing to *this* repo, the outcome gate is these eight, and none of
+When contributing to *this* repo, the outcome gate is these nine, and none of
 them is optional:
 
 ```bash
@@ -160,12 +189,13 @@ python3 scripts/render_agents.py --host claude-code --check
 python3 scripts/render_agents.py --host codex --check
 python3 scripts/build_adapter.py --host claude-code --check
 python3 scripts/validate_interfaces.py
+python3 scripts/validate_roles.py
 python3 scripts/smoke_install.py --host claude-code
 claude plugin validate .
 python3.11 -m unittest discover -s tests -t .   # any 3.11+, for tomllib
 ```
 
-Each of the six after the suite exists because the suite alone has been green
+Each of the ones after the suite exists because the suite alone has been green
 over a real defect:
 
 - The tests do not read `.claude-plugin/`, so a manifest that disagrees with

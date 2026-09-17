@@ -117,15 +117,45 @@ def toml_basic(text):
     return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def yaml_double_quoted(text):
+    """Quote a value for a YAML double-quoted scalar.
+
+    Every other frontmatter value this renderer writes is a bare scalar drawn
+    from a constrained vocabulary - a model alias, a tool name, an id matching
+    a pattern. `initialPrompt` is the first free prose to reach the
+    frontmatter, and prose contains the two characters that end a plain scalar:
+    a colon-space starts a mapping, a leading `#` starts a comment. Quoting is
+    not tidiness here - an unquoted prompt containing ": " makes the whole
+    frontmatter block parse as something else, and the agent silently launches
+    without the startup check it exists to carry.
+    """
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    return '"%s"' % escaped.replace("\n", "\\n")
+
+
+def is_dispatched(role):
+    """Whether something else starts this agent.
+
+    Everything in this architecture is dispatched except root, which runs as
+    the main thread. The distinction is load-bearing wherever delegation is
+    reasoned about: a dispatched agent that delegates needs NESTED delegation,
+    a main-thread one needs only delegation. Reading this wrong in either
+    direction ships a false claim - it would either block root on a host that
+    can carry it, or let a dispatched agent rest on nesting nobody sourced.
+    """
+    return role["kind"] != "root"
+
+
 def role_targets_host(role, host_name):
     """Whether this role may be generated for this host at all.
 
     Derived from adapters/<host>/agent-interface.json rather than declared on
-    the role, so it tracks what the host was last measured to do. A role that
-    delegates needs NESTED delegation - it is itself dispatched, so it would be
-    a spawned agent spawning - and a host whose nesting is unsourced may not
-    carry it. Generating one anyway would ship an agent that cannot do the one
-    thing it exists for, on the strength of an assumption.
+    the role, so it tracks what the host was last measured to do. A DISPATCHED
+    role that delegates needs NESTED delegation - it would be a spawned agent
+    spawning - and a host whose nesting is unsourced may not carry it.
+    Generating one anyway would ship an agent that cannot do the one thing it
+    exists for, on the strength of an assumption. Root needs only plain
+    delegation, because nothing spawned root.
 
     Returns (True, None) or (False, reason).
     """
@@ -142,22 +172,122 @@ def role_targets_host(role, host_name):
         return False, ("%s's agent-interface.json will not load (%s)"
                        % (host_name, exc))
 
-    nested = interface.get("delegation", {}).get("nested", {})
-    level = (nested.get("provenance") or {}).get("level")
+    delegation = interface.get("delegation", {})
+    claim = delegation.get("nested", {}) if is_dispatched(role) else delegation
+    what = "nested delegation" if is_dispatched(role) else "delegation"
+
+    level = (claim.get("provenance") or {}).get("level")
     if level in (None, "unsourced"):
-        return False, ("nested delegation is unsourced on %s; a delegating "
-                       "role may not be built against an assumption" % host_name)
-    if not nested.get("supported"):
-        return False, "%s cannot nest delegation" % host_name
+        return False, ("%s is unsourced on %s; a delegating role may not be "
+                       "built against an assumption" % (what, host_name))
+    if not claim.get("supported"):
+        return False, "%s does not support %s" % (host_name, what)
     return True, None
+
+
+def delegation_scope(role, host):
+    """How this host handles "you may dispatch only these types", for this role.
+
+    Returns (names, enforced, note): the tool names the delegate intent must be
+    written as, whether the restriction actually binds for THIS role, and the
+    sentence that goes in the Enforcement section - or None where there is
+    nothing to say.
+
+    The asymmetry is the whole reason this is a function. On a host whose scope
+    binds only for the main thread, the very same syntax is a guarantee in
+    root's file and a decoration in the orchestrator's. Deriving both from the
+    manifest keeps the renderer from hardcoding which host that is, which it
+    used to.
+    """
+    tool_names = host["tool_map"].get("delegate") or []
+    if "delegate" not in role["tools"]["allow"]:
+        return tool_names, False, None
+
+    scope = (host.get("main_thread") or {}).get("delegate_scope") or {}
+    declared = (role.get("launch") or {}).get("delegates_to")
+    main_thread_only = bool(scope.get("main_thread_only"))
+
+    if not tool_names:
+        # An unmapped intent is not the same as a missing capability: codex
+        # maps no tool name for reading either, and plainly reads. So this is
+        # not a reason to refuse to build - but a declared dispatch scope on a
+        # host where this repository cannot even name the dispatching tool is
+        # the weakest form the restriction takes, and saying nothing would
+        # leave root's file quietly silent about its only real boundary.
+        if declared:
+            return tool_names, False, (
+                "You may dispatch only: %s. This host maps no tool name to "
+                "delegation in hosts/%s.json, so neither the grant nor the "
+                "scope is written anywhere the host reads - both are "
+                "instructions to you and nothing else."
+                % (", ".join(declared), host["host"]))
+        return tool_names, False, None
+
+    if not declared:
+        # Nothing to scope TO. The only thing worth saying is for a dispatched
+        # delegator on a host that has the syntax but ignores it there - the
+        # grant would otherwise imply a restriction the host does not apply.
+        if scope.get("supported") and main_thread_only and is_dispatched(role):
+            return tool_names, False, (
+                "Which agents you may dispatch is **not enforced**. This "
+                "host's %s restriction binds only for an agent running as the "
+                "main thread, and you are dispatched, so the type list is "
+                "ignored for you. Your grant is delegation to anything the "
+                "session offers; dispatching only the worker roles is your "
+                "obligation, not the host's guarantee."
+                % scope["template"].format(tool=tool_names[0], types="type"))
+        return tool_names, False, None
+
+    if not scope.get("supported"):
+        return tool_names, False, (
+            "You may dispatch only: %s. This host cannot express that "
+            "restriction in an agent definition, so it is an instruction and "
+            "nothing refuses a different dispatch." % ", ".join(declared))
+
+    types = scope.get("separator", ", ").join(
+        (scope.get("type_template") or "{id}").format(
+            plugin=plugin_name(), id=name) for name in declared)
+    scoped = [scope["template"].format(tool=name, types=types)
+              for name in tool_names]
+
+    if main_thread_only and is_dispatched(role):
+        # Declaring a scope on an agent the host will not scope. Nothing in
+        # this repository does it, but the honest rendering is the bare grant
+        # plus the reason, not a syntax the host discards.
+        return tool_names, False, (
+            "You declare a dispatch scope of %s, but this host applies that "
+            "restriction only to a main-thread agent and you are dispatched. "
+            "The grant written above is unscoped." % ", ".join(declared))
+
+    return scoped, True, (
+        "**Dispatch scope is enforced.** Your grant is written as `%s`, and "
+        "this host resolves it: an attempt to dispatch anything else has no "
+        "tool to make it with.%s"
+        % (", ".join(scoped),
+           " This is the one guarantee that depends on how you were started - "
+           "it binds because you run as the main thread, and would be ignored "
+           "if this same file were dispatched as a subagent."
+           if main_thread_only else ""))
+
+
+def plugin_name():
+    """The name the host loads this plugin's agents under.
+
+    Read from the plugin manifest rather than hardcoded, because it is the same
+    string in two places otherwise and a rename would leave root's type list
+    pointing at agents that no longer answer to those names.
+    """
+    manifest = ROOT / ".claude-plugin" / "plugin.json"
+    return json.loads(manifest.read_text(encoding="utf-8"))["name"]
 
 
 def resolve_tools(role, host):
     """Map portable intents to host tool names, collecting what cannot map."""
     tool_map = host["tool_map"]
+    scoped_delegate, _enforced, _note = delegation_scope(role, host)
     allow, deny, unmappable = [], [], []
     for intent in role["tools"]["allow"]:
-        names = tool_map.get(intent)
+        names = scoped_delegate if intent == "delegate" else tool_map.get(intent)
         if not names:
             unmappable.append(intent)
             continue
@@ -258,18 +388,47 @@ def disclosures(role, host, unmappable):
             "compliance.")
     # An agent that delegates can be told WHICH types to delegate to, but on a
     # host where that restriction binds only for the main thread it does not
-    # bind here - a dispatched agent's type list is ignored. Root gets the
+    # bind for a dispatched one - its type list is ignored. Root gets the
     # enforced version of this and the orchestrator does not, which is an
     # asymmetry worth stating rather than letting the grant imply otherwise.
-    if "delegate" in role["tools"]["allow"] and host["host"] == "claude-code":
+    # Which side of it a role lands on is read from the manifest; this used to
+    # name claude-code in an `if`, which made the claim true only by accident.
+    _names, enforced, note = delegation_scope(role, host)
+    if note and not enforced:
+        out.append(note)
+
+    if role["kind"] == "root" and not main_thread_startup(host):
         out.append(
-            "Which agents you may dispatch is **not enforced**. This host's "
-            "Agent(type) restriction binds only for an agent running as the "
-            "main thread, and you are dispatched, so the type list is ignored "
-            "for you. Your grant is delegation to anything the session offers; "
-            "dispatching only the worker roles is your obligation, not the "
-            "host's guarantee.")
+            "This host does not auto-submit a startup prompt, so your startup "
+            "check runs only because you run it. Nothing will stop a session "
+            "that skips it, which is exactly the failure the check exists to "
+            "catch - treat it as the first thing you do, not the first thing "
+            "you can defer.")
     return out
+
+
+def main_thread_startup(host):
+    """The field this host auto-submits a main-thread agent's first prompt in.
+
+    None where it has none, or declares none. A host that says nothing about it
+    is treated as having none: the fallback is an instruction root must follow
+    rather than a prompt the host submits, which is the safe direction to be
+    wrong in.
+    """
+    block = (host.get("main_thread") or {}).get("initial_prompt") or {}
+    return block.get("field") if block.get("supported") else None
+
+
+def guarantees(role, host):
+    """What this host enforces that is NOT a prohibition from must_not.
+
+    Kept apart from enforced_prohibitions() because the shapes differ: that one
+    answers "which of this role's declared prohibitions are impossible to
+    violate here", and root's dispatch scope is not a prohibition it declared -
+    it is a positive restriction the host applies to the grant itself.
+    """
+    _names, enforced, note = delegation_scope(role, host)
+    return [note] if note and enforced else []
 
 
 def render_markdown_yaml(role, host, role_file):
@@ -323,6 +482,10 @@ def render_markdown_yaml(role, host, role_file):
             and caps["read_only_enforced"]["field"] not in
             (caps["tool_allowlist"].get("field"), None)):
         lines.append("%s: true" % caps["read_only_enforced"]["field"])
+    startup_field = main_thread_startup(host)
+    startup = (role.get("launch") or {}).get("initial_prompt")
+    if startup and startup_field:
+        lines.append("%s: %s" % (startup_field, yaml_double_quoted(startup)))
     lines.append("---")
 
     lines += ["", "<!-- %s -->" % BANNER.format(role_file=role_file,
@@ -332,13 +495,26 @@ def render_markdown_yaml(role, host, role_file):
               "definition of this role and it governs you; this file carries "
               "only the host frontmatter and the disclosures below."
               % (prefix, role["prose"]), "",
-              "Return exactly one fenced `json` block in this shape, and "
-              "nothing else. Root validates it mechanically before reading it; "
-              "a malformed return is sent back once.", "",
-              "```json", return_skeleton(role), "```", "",
-              "Placeholders show the type; `a|b` means pick one. The full "
-              "contract, including the optional fields, is "
-              "`%s/schemas/%s`." % (prefix, role["returns"]), ""]
+              ]
+    if role["returns"] == "none":
+        # Root answers to the operator in prose. Emitting an empty contract
+        # here, or a skeleton of nothing, would invent a return for an agent
+        # that has nobody to return to.
+        lines += ["You return nothing to anybody. The record of a run is the "
+                  "ledger, the envelopes and the Git history, not a summary "
+                  "you wrote.", ""]
+    else:
+        lines += ["Return exactly one fenced `json` block in this shape, and "
+                  "nothing else. Root validates it mechanically before reading "
+                  "it; a malformed return is sent back once.", "",
+                  "```json", return_skeleton(role), "```", "",
+                  "Placeholders show the type; `a|b` means pick one. The full "
+                  "contract, including the optional fields, is "
+                  "`%s/schemas/%s`." % (prefix, role["returns"]), ""]
+
+    startup = (role.get("launch") or {}).get("initial_prompt")
+    if startup:
+        lines += ["## Startup", "", startup, ""]
 
     lines += ["## Grant", "",
               "Capability class: **%s**." % role["mutation"], ""]
@@ -353,21 +529,23 @@ def render_markdown_yaml(role, host, role_file):
 
     notes = disclosures(role, host, unmappable)
     enforced = enforced_prohibitions(role, host)
+    held = guarantees(role, host)
     lines += ["## Enforcement", ""]
     if notes:
         lines.append("What this host does *not* enforce for you:")
         lines.append("")
         lines += ["- %s" % note for note in notes]
         lines.append("")
-    elif not enforced:
+    elif not enforced and not held:
         lines.append("Every declared capability is enforced by the host itself.")
         lines.append("")
-    if enforced:
+    if enforced or held:
         lines.append("What this host **does** enforce, so it is not left to your "
                      "compliance:")
         lines.append("")
         lines += ["- **%s** — %s" % (name, why)
                   for name, why in sorted(enforced.items())]
+        lines += ["- %s" % note for note in held]
         lines.append("")
     return "\n".join(lines)
 
@@ -381,15 +559,24 @@ def render_toml(role, host, role_file):
         "Read %s/%s before doing anything. It is the canonical "
         "definition of this role and it governs you." % (prefix, role["prose"]),
         "",
-        "Return exactly one fenced json block in this shape, and nothing "
-        "else. Placeholders show the type; a|b means pick one. The full "
-        "contract is %s/schemas/%s." % (prefix, role["returns"]),
-        "",
-        return_skeleton(role),
-        "",
-        "Capability class: %s. Allowed: %s."
-        % (role["mutation"], format_allow_list(allow)),
     ]
+    if role["returns"] == "none":
+        body += ["You return nothing to anybody. The record of a run is the "
+                 "ledger, the envelopes and the Git history, not a summary you "
+                 "wrote.", ""]
+    else:
+        body += ["Return exactly one fenced json block in this shape, and "
+                 "nothing else. Placeholders show the type; a|b means pick "
+                 "one. The full contract is %s/schemas/%s."
+                 % (prefix, role["returns"]),
+                 "",
+                 return_skeleton(role),
+                 ""]
+    startup = (role.get("launch") or {}).get("initial_prompt")
+    if startup:
+        body += ["Startup: %s" % startup, ""]
+    body.append("Capability class: %s. Allowed: %s."
+                % (role["mutation"], format_allow_list(allow)))
     if deny:
         body.append("Denied: %s." % ", ".join(deny))
     if role["tools"].get("shell_purpose"):
@@ -400,11 +587,13 @@ def render_toml(role, host, role_file):
         body.append("Not enforced by this host:")
         body += ["- %s" % note.replace("**", "") for note in notes]
     enforced = enforced_prohibitions(role, host)
-    if enforced:
+    held = guarantees(role, host)
+    if enforced or held:
         body.append("")
         body.append("Enforced by this host, not left to your compliance:")
         body += ["- %s: %s" % (name, why.replace("**", ""))
                  for name, why in sorted(enforced.items())]
+        body += ["- %s" % note.replace("**", "") for note in held]
 
     lines = ["# %s" % BANNER.format(role_file=role_file, host=host["host"]),
              'name = "%s"' % toml_basic(role["id"]),
@@ -416,6 +605,9 @@ def render_toml(role, host, role_file):
                                     toml_basic(host["effort_map"][role["reasoning"]["default"]])))
     if role["mutation"] == "read-only" and caps["read_only_enforced"]["supported"]:
         lines.append('%s = "read-only"' % caps["read_only_enforced"]["field"])
+    startup_field = main_thread_startup(host)
+    if startup and startup_field:
+        lines.append('%s = "%s"' % (startup_field, toml_basic(startup)))
     lines.append('developer_instructions = """')
     # Everything above is generated from repo-controlled manifests. `body`
     # is not: it carries the plugin root the installer was given, so it is

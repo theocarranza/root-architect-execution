@@ -28,6 +28,10 @@ Four rules this enforces rather than requests:
   * **The queue must agree with the mailbox.** `verify` cross-checks: every
     envelope the queue names must actually exist. Two records that can drift
     are worth less than one, unless something compares them.
+  * **A run does not start unchecked.** `init` refuses without a passing
+    startup check on record for the run (ADR 0003 D11). That is what makes the
+    check a gate rather than advice: root skipping it does not produce a run
+    that merely lacks a record, it produces no run.
 """
 import argparse
 import json
@@ -37,6 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mailbox  # noqa: E402
+import root_preflight  # noqa: E402
 from jsonschema_mini import SchemaError, Validator  # noqa: E402
 
 SCHEMAS = Path(__file__).resolve().parent.parent / "schemas"
@@ -113,6 +118,14 @@ def save(workspace, run_id, document):
 
 
 def init(workspace, run_id, tasks):
+    checked, why = root_preflight.passed(workspace, run_id)
+    if not checked:
+        raise JobQueueError(
+            "refusing to queue run %s: %s\n\nThe queue is where a run begins, "
+            "so it is where the startup check has to bite. Orchestrating "
+            "without it would record an isolation nothing was holding."
+            % (run_id, why))
+
     path = queue_path(workspace, run_id)
     if path.exists():
         raise JobQueueError(

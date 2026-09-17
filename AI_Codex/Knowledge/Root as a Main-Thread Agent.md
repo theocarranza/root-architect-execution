@@ -34,10 +34,19 @@ the host documents that it binds only for main-thread agents:
 > The type list inside parentheses applies only to agents running as the main
 > thread with `claude --agent`. In subagent definitions, the list is ignored.
 
-Two further fields, `initialPrompt` and `omitClaudeMd`, are documented as *"only
-used when agent runs as main session via `--agent` or `agent` setting."* Claude
-Code treats a main-thread agent as a distinct execution mode, and the guarantees
-this architecture depends on exist only inside that mode.
+`initialPrompt` is documented as *"only used when agent runs as main session via
+`--agent` or `agent` setting."* Claude Code treats a main-thread agent as a
+distinct execution mode, and the guarantees this architecture depends on exist
+only inside that mode.
+
+> **Corrected 2026-09-17, while building D10.** This paragraph originally
+> bracketed `omitClaudeMd` with `initialPrompt` as *"only used"* in main-session
+> mode. That is backwards, and the correction is in the doc's own words, already
+> recorded in `adapters/claude-code/agent-interface.json`: *"Ignored when agent
+> runs as main session via --agent or agent setting."* The two fields are scoped
+> in opposite directions — one exists only for a main-thread agent, the other
+> exists for everything except one. §3's CLAUDE.md paragraph rested on the wrong
+> half and is corrected there too.
 
 ## 3. What this means for the product
 
@@ -82,11 +91,23 @@ exists to prevent.
 
 ### CLAUDE.md becomes a deliberate choice
 
-A main-thread agent loads user, project and local CLAUDE.md by default. Root
-would inherit whatever the operator's repo says, which can conflict with its own
-protocol. `omitClaudeMd: true` is available and is the setting adopted for root:
-operator instructions reach it by relay through the protocol, not ambiently.
-Managed policy files still load regardless. Requires v2.1.271+.
+A main-thread agent loads user, project and local CLAUDE.md, and **has no way
+not to**. Root inherits whatever the operator's repo says, which can conflict
+with its own protocol.
+
+> **Corrected 2026-09-17.** This said `omitClaudeMd: true` was "the setting
+> adopted for root". It cannot be: the field is *"Ignored when agent runs as
+> main session via --agent or agent setting"*, which is precisely how root runs.
+> The escape hatch this section described does not exist for the one agent it
+> was described for.
+
+So this is a live constraint on the product rather than a setting. Root's
+protocol has to survive an operator CLAUDE.md it did not write and cannot
+suppress — which argues for root's own instructions being specific enough to win
+a conflict, and for treating a contradiction between the two as something root
+raises with the operator rather than resolves silently. The relevant field for
+workers is unaffected: a dispatched agent's `omitClaudeMd: true` does what it
+says. Requires v2.1.271+. Managed policy files load regardless, everywhere.
 
 ## 4. Consequences for the adapter work
 
@@ -100,8 +121,8 @@ only this other agent." That is a per-host capability question, answered in
 First-party documentation, fetched 2026-09-17:
 
 - `https://code.claude.com/docs/en/sub-agents` — `Agent(type)` main-thread
-  restriction; `initialPrompt` / `omitClaudeMd` main-session scoping;
-  `omitClaudeMd` default and managed-policy exception.
+  restriction; `initialPrompt` main-session scoping; `omitClaudeMd` default,
+  its main-session exclusion, and the managed-policy exception.
 - `https://code.claude.com/docs/en/plugins-reference` — plugin-shipped agent
   field support.
 

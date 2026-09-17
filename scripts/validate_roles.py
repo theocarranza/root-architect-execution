@@ -38,10 +38,11 @@ def check_roles(problems):
             problems.append("roles/%s names prose at %s, which does not exist"
                             % (role_file, role["prose"]))
 
-        contract = ROOT / "schemas" / role["returns"]
-        if not contract.exists():
-            problems.append("roles/%s returns %s, which does not exist"
-                            % (role_file, role["returns"]))
+        if role["returns"] != "none":
+            contract = ROOT / "schemas" / role["returns"]
+            if not contract.exists():
+                problems.append("roles/%s returns %s, which does not exist"
+                                % (role_file, role["returns"]))
 
         # A read-only role that grants a shell is a contradiction the schema
         # cannot catch: both halves are individually valid.
@@ -69,6 +70,17 @@ def check_roles(problems):
             problems.append("roles/%s is the orchestrator and does not grant "
                             "delegate; it would have nothing to orchestrate"
                             % role_file)
+
+        # `launch` belongs to the one agent that is launched rather than
+        # dispatched. The schema cannot say this - it has no `not` - so the
+        # rule lives here, where it can also say why.
+        if role["kind"] != "root" and "launch" in role:
+            problems.append("roles/%s declares launch, but only root is "
+                            "launched rather than dispatched; a dispatched "
+                            "agent has no launch of its own to describe"
+                            % role_file)
+        if role["kind"] == "root":
+            check_root(role_file, role, problems)
 
         overlap = set(role["tools"]["allow"]) & set(role["tools"]["deny"])
         if overlap:
@@ -100,6 +112,44 @@ def check_roles(problems):
     # both. A cap here looked like defence in depth and was in fact unreachable:
     # mutation testing caught it passing whether present or not.
     return roles
+
+
+def check_root(role_file, role, problems):
+    """Root's own invariants, none of which the schema can reach.
+
+    Each one is a way the boundary could be declared and not be there: a root
+    that dispatches workers directly, a scope naming agents nobody ships, or a
+    manifest that disagrees with the guard shipped to enforce it.
+    """
+    launch = role["launch"]
+    if not launch.get("main_thread"):
+        problems.append("roles/%s is root and does not declare main_thread; the "
+                        "dispatch scope binds only for a main-thread agent, so "
+                        "a root launched otherwise has no boundary" % role_file)
+
+    positions = {r["role"] for _f, r in render_agents.load_roles()}
+    for target in launch["delegates_to"]:
+        if target not in positions:
+            problems.append("roles/%s may dispatch %r, which no role manifest "
+                            "fills; the scope would name an agent nobody ships"
+                            % (role_file, target))
+    if "implementer" in launch["delegates_to"]:
+        problems.append("roles/%s lets root dispatch a worker directly. Work "
+                        "flows root -> orchestrator -> workers; a root that "
+                        "reaches a worker is the topology this architecture "
+                        "exists to prevent" % role_file)
+
+    # The manifest and the shipped guard have to agree about the one
+    # prohibition the guard enforces. Either alone is a claim.
+    if "interfere-with-dispatch" not in role["must_not"]:
+        problems.append("roles/%s does not declare interfere-with-dispatch, but "
+                        "hooks/root_write_guard.py refuses root's writes inside "
+                        "an open dispatch. The agent file would omit the one "
+                        "prohibition the shipped hook enforces" % role_file)
+    if not (ROOT / "hooks" / "root_write_guard.py").is_file():
+        problems.append("roles/%s declares interfere-with-dispatch, but "
+                        "hooks/root_write_guard.py is not there to enforce it"
+                        % role_file)
 
 
 def check_host(name, roles, problems):
