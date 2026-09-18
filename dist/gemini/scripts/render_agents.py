@@ -528,6 +528,12 @@ def guarantees(role, host):
     return [note] if note and enforced else []
 
 
+_SUBAGENT_HEADER_FIELDS = {
+    True: "dispatched_field",
+    False: "main_thread_field",
+}
+
+
 def render_markdown_yaml(role, host, role_file):
     caps = host["capabilities"]
     prefix = host.get("root_placeholder", "<skill_root>")
@@ -535,11 +541,8 @@ def render_markdown_yaml(role, host, role_file):
     lines = ["---", "name: %s" % role["id"], "description: %s" % role["description"]]
     if caps.get("subagent_flag", {}).get("supported"):
         flag = caps["subagent_flag"]
-        field = (
-            flag.get("dispatched_field") or flag.get("field")
-            if is_dispatched(role)
-            else flag.get("main_thread_field") or flag.get("field")
-        )
+        key = _SUBAGENT_HEADER_FIELDS[is_dispatched(role)]
+        field = flag.get(key, flag.get("field"))
         if field:
             lines.append("%s: true" % field)
 

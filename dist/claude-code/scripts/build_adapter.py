@@ -115,25 +115,24 @@ def build(host, out_dir):
                 "layout entry %r -> %r mixes a directory with a file; a "
                 "trailing slash must appear on both sides or neither" % (source, destination)
             )
-        if source.endswith("/"):
+        is_dir = source.endswith("/")
+        if is_dir:
             if not origin.is_dir():
                 raise BuildError("%s is not a directory" % shown(origin))
-            for item in sorted(origin.rglob("*")):
-                if not item.is_file():
-                    continue
-                relative = item.relative_to(origin)
-                if excluded(relative, patterns):
-                    continue
-                landing = target / relative
-                landing.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(item, landing)
-                written.append(landing.relative_to(out_dir))
+            items = origin.rglob("*")
         else:
             if not origin.is_file():
                 raise BuildError("%s is not a file" % shown(origin))
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(origin, target)
-            written.append(target.relative_to(out_dir))
+            items = [origin]
+
+        for item in sorted(p for p in items if p.is_file()):
+            relative = item.relative_to(origin) if is_dir else Path()
+            if is_dir and excluded(relative, patterns):
+                continue
+            landing = target / relative
+            landing.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, landing)
+            written.append(landing.relative_to(out_dir))
     return sorted(written)
 
 
