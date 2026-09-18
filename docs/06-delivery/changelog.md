@@ -18,4 +18,4 @@ last_reviewed: 2026-09-17
 - Documented fail-closed state behavior and host-specific enforcement limitations.
 - Recorded current handoff status: root half of e2e observed; orchestrator-to-worker and live guard path still awaiting full observation; Cursor sourcing remains open.
 
-This changelog describes the generated documentation package, not upstream repository release history.
+This changelog describes the generated documentation package. For upstream repository release history, see the root [CHANGELOG.md](../../CHANGELOG.md).
