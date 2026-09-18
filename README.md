@@ -1,347 +1,362 @@
 # root-architect-execution
 
-A Claude Code plugin for running an implementation plan from a root session that
-owns the plan, Git, and the ledger, and delegates every line of product code to
-cheaper isolated workers.
+[![Outcome Gate](https://github.com/theocarranza/root-architect-execution/actions/workflows/outcome-gate.yml/badge.svg?branch=master)](https://github.com/theocarranza/root-architect-execution/actions/workflows/outcome-gate.yml)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg)](https://docs.anthropic.com/en/docs/claude-code)
+[![Codex](https://img.shields.io/badge/Codex-supported-black.svg)](https://developers.openai.com/codex/)
+[![Documentation](https://img.shields.io/badge/docs-project_documentation-informational.svg)](./docs/README.md)
 
-It is the `root-architect-execution` skill plus the machinery the skill used to
-only describe: schema-declared agent roles, generated host agent files, and two
-PreToolUse hooks that enforce the two rules prose never managed to.
+A contract-driven execution protocol for running implementation plans through a **root architect** that owns planning, Git history, durable state, and acceptance gates while delegating product-code changes to isolated workers.
 
-## Install
+The project turns agent orchestration from a prose convention into an auditable execution system: roles are schema-declared, host agents are generated, worker handoffs are validated, dispatch state is durable, and host-specific guards enforce authority boundaries where the host exposes the required capabilities.
 
-### Codex
+> **Core rule:** root owns authority; workers own bounded execution.
 
-Codex plugin installation copies the bundle but does not automatically
-materialize this repository's custom agent TOMLs. After installing, activate
-the agents explicitly:
+## Why this exists
 
-```bash
-python3 scripts/build_adapter.py --host codex        # from a clone
-codex plugin add /path/to/dist/codex
-python3 /path/to/dist/codex/install.py \
-  --target .codex/agents \
-  --plugin-root /path/to/dist/codex
+Agentic coding becomes difficult to trust when planning, implementation, review, Git mutation, and final acceptance all happen inside the same context.
+
+`root-architect-execution` separates those responsibilities:
+
+```text
+Human Owner
+    |
+    v
+Root Architect
+(plan + Git + ledger + gates)
+    |
+    v
+Orchestrator
+    |
+    +-------------------+
+    |                   |
+    v                   v
+Implementer        Validators
+(write-scoped)     (spec + quality)
+    |                   |
+    +---------+---------+
+              |
+              v
+       Structured Evidence
+              |
+              v
+      Root Acceptance Gate
 ```
 
-`install.py` ships **inside** the bundle, and so does everything it reads, so
-the bundle is self-sufficient: it re-renders each TOML with the installed
-plugin root substituted in, which is what makes a worker's role prose
-resolvable on the machine running it. The bootstrap is idempotent, removes only
-files its own marker recorded, and never writes generated agents into the
-source repository.
-Codex does not document worker identity in `PreToolUse`, so root-versus-worker
-write separation is instructional and enforced by root's diff review. Claude's
-identity-aware write guard remains active.
+The root session does not silently replace a failed worker by writing delegated product code itself. Implementation, specification review, and quality review are separate roles, and their results cross schema-checked interfaces before root advances the run.
 
-The plugin ships its own marketplace manifest, so installing is two commands:
-register the marketplace, then install from it.
+## Documentation
+
+The repository contains a structured documentation interface under [`docs/`](./docs/README.md).
+
+| Area         | Documentation                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------ |
+| Product      | [`docs/00-product/`](./docs/00-product/) — vision, requirements, glossary                                    |
+| Architecture | [`docs/01-architecture/`](./docs/01-architecture/) — system context, architecture, data model, ADRs          |
+| Design       | [`docs/02-design/`](./docs/02-design/) — command contracts, components, workflows                            |
+| Engineering  | [`docs/03-engineering/`](./docs/03-engineering/) — development, testing, standards, dependencies             |
+| Operations   | [`docs/04-operations/`](./docs/04-operations/) — deployment, environments, observability, runbooks, recovery |
+| Security     | [`docs/05-security/`](./docs/05-security/) — authority model, threat model, privacy                          |
+| Delivery     | [`docs/06-delivery/`](./docs/06-delivery/) — roadmap, releases, changelog                                    |
+| Guides       | [`docs/07-guides/`](./docs/07-guides/) — onboarding, usage, troubleshooting                                  |
+| Templates    | [`docs/_templates/`](./docs/_templates/) — reusable documentation contracts                                  |
+
+Start with the **[documentation index](./docs/README.md)** for the complete project model. For implementation work, read [`SKILL.md`](./SKILL.md) as the canonical execution protocol and [`HANDOFF.md`](./HANDOFF.md) for current execution status.
+
+## Architecture at a glance
+
+The repository is split into declarations, generated host representations, runtime controls, and verification.
+
+```text
+roles/*.json ---------+
+hosts/*.json ---------+----> render_agents.py ----> host agent files
+references/agents/* --+                              |
+                                                     v
+adapters/<host>/* ----------------------------> build_adapter.py
+                                                     |
+                                                     v
+                                               dist/<host>/
+
+schemas/*.json ---> briefs / reports / verdicts / dispatch state
+                         |
+                         v
+                   runtime gates
+                         |
+             +-----------+-----------+
+             |                       |
+     dispatch_state.py         check_return.py
+             |                       |
+             +-----------+-----------+
+                         |
+                         v
+                  root acceptance
+```
+
+The important architectural boundary is documented in [`docs/01-architecture/architecture.md`](./docs/01-architecture/architecture.md).
+
+## Supported hosts
+
+| Host        | Status                       | Notes                                                                                                                                          |
+| ----------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | Supported                    | Generated agents, plugin bundle, identity-aware PreToolUse guards, smoke installation                                                          |
+| Codex       | Supported                    | Generated TOML agents and install bootstrap; root/worker write isolation cannot currently use the same documented identity-aware hook boundary |
+| Cursor      | Reference / sourcing pending | Retained as a reference path; capability claims require re-verification before equivalent support is asserted                                  |
+
+Host capabilities are declared under [`hosts/`](./hosts/) and checked against adapter interface provenance.
+
+## Installation
+
+### Claude Code
+
+The plugin ships its own marketplace manifest.
 
 ```bash
 # From a local clone
 claude plugin marketplace add /path/to/root-architect-execution
 claude plugin install root-architect-execution@root-architect-execution
 
-# Or straight from the repo
-claude plugin marketplace add <owner>/<repo>
+# Or from GitHub
+claude plugin marketplace add theocarranza/root-architect-execution
 claude plugin install root-architect-execution@root-architect-execution
 ```
 
-`--scope` decides who gets it: `user` (default, every project), `project`
-(committed to the repo you are in, so the team shares it), or `local` (this
-checkout only, uncommitted). It is accepted by both commands.
+Restart Claude Code after installation. PreToolUse hooks are loaded at session start.
 
-**Restart Claude Code afterwards.** Skills and agents load on demand, but the two
-PreToolUse hooks are read at session start, so until you restart, the guards are
-installed and not enforcing.
-
-Verify:
+Verify the installation:
 
 ```bash
-claude plugin list                      # root-architect-execution, enabled, 0.1.1
+claude plugin list
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_roles.py"
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" --host claude-code --check
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" \
+  --host claude-code --check
 ```
 
-The last two are the capability gate. They are worth running once after install:
-they confirm the agent roles resolve on this host and that `agents/` still
-matches `roles/` and `hosts/`, which is the thing the protocol refuses to start
-without.
+### Codex
 
-### Updating
+Codex installation requires the bundled bootstrap to materialize this repository's custom agent TOMLs:
 
 ```bash
-claude plugin update root-architect-execution
+python3 scripts/build_adapter.py --host codex
+
+codex plugin add /path/to/dist/codex
+
+python3 /path/to/dist/codex/install.py \
+  --target .codex/agents \
+  --plugin-root /path/to/dist/codex
 ```
 
-The install cache is **version-keyed** — `~/.claude/plugins/cache/root-architect-execution/root-architect-execution/<version>/`
-— and it is a copy, not a symlink. So editing a local clone changes nothing in an
-installed session: bump the version, reinstall or update, and restart. If the new
-version directory is not there, the update did not land.
+See [`docs/04-operations/deployment.md`](./docs/04-operations/deployment.md) for the complete installation and deployment model.
 
-### Developing against a local clone
+## Claude Code prerequisite: nesting depth
 
-`claude plugin marketplace add <path>` on a directory source points at the
-working tree rather than caching a copy of it, so a clone can serve as its own
-marketplace while you work on it. **Point it at `dist/claude-code`, not the
-repository root** — since ADR 0001 step 3 the hooks and both manifests live in
-`adapters/claude-code/`, and the root is no longer a plugin.
+The architecture requires two levels of agent nesting:
 
-```bash
-python3 scripts/build_adapter.py --host claude-code
-claude plugin marketplace add ./dist/claude-code
+```text
+root -> orchestrator -> worker
 ```
 
-So the loop gains a build: edit → build → restart. That is the cost ADR 0001
-names — the thing reviewed stops being the thing that runs — and it is paid
-down by `build_adapter.py --check`, which rebuilds into a temporary directory
-and compares byte for byte, so a stale bundle fails the gate rather than
-shipping.
-
-Three things still bite:
-
-- Hooks are read at session start, so hook changes need a restart regardless.
-- Forgetting the rebuild is the new way to confuse yourself. The symptom is a
-  session behaving like the last build; `--check` is the answer.
-- `manifest.template.json` and the entry in `marketplace.template.json` each
-  carry a version and they must agree. `plugin.json` wins at install time and
-  the marketplace entry is silently ignored, so drift is invisible until
-  something installs the wrong thing. `claude plugin validate dist/claude-code`
-  catches it — and note the target: at the repository root the same command
-  does not fail, it quietly switches to validating components and exits 0
-  regardless. The suite asserts the agreement directly for that reason.
-
-## Install prerequisite: the nesting cap
-
-Orchestration needs two levels of agent nesting — root dispatches the
-orchestrator, the orchestrator dispatches workers. Claude Code caps nesting at
-`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, and at the cap the `Agent` tool is
-withheld from the dispatched agent's toolset **entirely**, rather than offered
-and refused. So an orchestrator at the cap does not fail loudly; it simply has
-no way to dispatch.
+Set the nesting cap **before launching Claude Code**:
 
 ```bash
 export CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2
 ```
 
-Two things worth knowing about that variable:
-
-- **It is read at process start.** Exporting it into a session already running
-  does nothing. Set it before launching.
-- **Its default is not a release constant.** Absent an explicit setting the
-  value comes from a remotely-controlled feature flag, so it can differ between
-  a local session and a web one, and can change with no local change at all.
-  Measured at `1` in a Claude Code web session on 2026-09-17.
-
-Verified rather than assumed, by an A/B probe of two fresh `claude -p`
-processes differing only in that variable: at `2` the dispatched subagent holds
-`Agent`, at `1` it does not.
-
-You do not have to remember this. Root checks the capability at startup and
-refuses to orchestrate without it, so a missing prerequisite stops the run with
-a reason instead of quietly producing an unisolated one.
-
-## State of the work
-
-`HANDOFF.md` carries what is done, what is open, and how to reproduce the
-end-to-end run. The short version: both ADRs are closed except Cursor, which is
-blocked on sourcing rather than engineering, and the root half of the protocol
-has been run for real — see [[First End-to-End Run]].
-
-## Starting a session as root
-
-Root is a **mode, not a command**. There is no slash command that turns an
-ordinary session into a root-architect one, because the boundary root's
-isolation rests on — `Agent(<plugin>:orchestrator)`, restricting root to
-dispatching the orchestrator and nothing else — binds only for an agent running
-as the main thread:
+Then launch root as the main-thread agent:
 
 ```bash
-CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2 claude --agent root-architect
+CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2 \
+claude --agent root-architect
 ```
 
-Launched any other way, that line is ignored and root can dispatch anything.
-The session looks and feels identical, which is the whole problem, so root's
-first act is a startup check:
+Root performs a startup capability check before initializing an execution run.
 
-```bash
-# Root writes down what it can actually see, then has it judged.
-python3 scripts/root_preflight.py --run-id <run-id> --observed observed.json
+## Execution model
+
+A normal task follows a fail-closed gate sequence:
+
+```text
+root preflight
+      |
+      v
+capability gate
+      |
+      v
+schema-valid brief
+      |
+      v
+open dispatch
+      |
+      v
+implementer
+  RED -> code -> GREEN
+      |
+      v
+return gate
+      |
+      v
+spec validator
+      |
+      v
+quality validator
+      |
+      v
+close dispatch
+      |
+      v
+ledger + narrow commit
+      |
+      v
+full outcome gate
 ```
 
-Root supplies the observation; the script supplies the verdict. `job_queue init`
-refuses a run with no passing record, so skipping the check does not produce a
-run that merely lacks one — it produces no run.
+A failed gate does not implicitly authorize root to bypass the failing role.
 
-What that check cannot do is catch a root that misreports what it sees. It
-catches every *accidental* way the boundary goes missing, which is every way it
-has actually gone missing.
+See [`docs/02-design/workflows.md`](./docs/02-design/workflows.md) for the complete workflow and retry/escalation model.
 
-## Layout
+## Repository layout
 
-| Path | What it is |
-| --- | --- |
-| `SKILL.md` | The protocol: architecture, gates, state, per-task loop, stop conditions |
-| `roles/*.json` | Every agent — the three workers, the orchestrator, and root — as model tier, reasoning strength, tool grant, mutation class |
-| `hosts/*.json` | What each host can actually express, with the date and evidence behind every claim |
-| `agents/*.md` | **Generated.** The Claude Code agent files |
-| `dist/<host>/` | **Built.** `claude-code/` and `codex/` are installable, byte-gated bundles; `cursor/` is still a reference agent copy |
-| `references/agents/*.md` | The role prose, written once and pointed at, never copied |
-| `references/contracts.md` | The four shapes the loop passes around |
-| `schemas/*.json` | Real JSON Schemas for roles, hosts, briefs, reports, verdicts, dispatch state |
-| `adapters/<host>/` | That host's **mechanics** — hooks, manifest templates, the installer, the interface file, the layout — plus `agents/`, which is generated. Never hand-written role content |
-| `scripts/` | Capability gate, interface gate, renderer, builder, return gate, dispatch state, mailbox, job queue, startup check |
-| `tests/` | `python3 -m unittest discover -s tests -t .` |
+| Path                                                   | Purpose                                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| [`SKILL.md`](./SKILL.md)                               | Canonical protocol: authority, gates, state, task loop, stop conditions   |
+| [`docs/`](./docs/)                                     | Structured project documentation                                          |
+| [`roles/`](./roles/)                                   | Vendor-neutral role declarations                                          |
+| [`hosts/`](./hosts/)                                   | Host capability declarations and evidence                                 |
+| [`references/agents/`](./references/agents/)           | Single-source role behavior                                               |
+| [`references/contracts.md`](./references/contracts.md) | Runtime handoff contracts                                                 |
+| [`schemas/`](./schemas/)                               | JSON Schemas for roles, hosts, briefs, reports, verdicts, and state       |
+| [`adapters/`](./adapters/)                             | Host-specific mechanics, hooks, manifests, installers, interfaces         |
+| [`agents/`](./agents/)                                 | Generated Claude Code agent files                                         |
+| [`scripts/`](./scripts/)                               | Validation, rendering, build, state, queue, return, and preflight tooling |
+| [`tests/`](./tests/)                                   | Automated verification                                                    |
+| [`dist/`](./dist/)                                     | Built host bundles; generated, not hand-edited                            |
+| [`HANDOFF.md`](./HANDOFF.md)                           | Current implementation/e2e status                                         |
 
-## The commands root runs
+## Runtime contracts
+
+Root works primarily through deterministic command and JSON interfaces.
+
+Open a schema-checked dispatch:
 
 ```bash
-# Capability gate — before dispatching anything
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_roles.py"
-
-# Open a dispatch from a schema-checked brief; the guards read this file
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" open \
-  --brief /tmp/brief.json --run-id 20260907-task-3
+  --brief /tmp/brief.json \
+  --run-id 20260907-task-3
+```
 
-# Return gate — before treating a worker's reply as a result
+Validate a worker return before treating it as evidence:
+
+```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/check_return.py" \
-  --role implementer --file /tmp/return.txt --task "..." --attempt 1
+  --role implementer \
+  --file /tmp/return.txt \
+  --task "..." \
+  --attempt 1
+```
 
-# Recovery — which state file is untrusted, and why
+Verify durable dispatch state during recovery:
+
+```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py" verify
 ```
 
-When contributing to *this* repo, the outcome gate is these ten, and none of
-them is optional:
+The command/contract interface is documented in [`docs/02-design/api.md`](./docs/02-design/api.md).
 
-```bash
-python3 -m unittest discover -s tests -t .
-python3 scripts/render_agents.py --host claude-code --check
-python3 scripts/render_agents.py --host codex --check
-python3 scripts/build_adapter.py --host claude-code --check
-python3 scripts/build_adapter.py --host codex --check
-python3 scripts/validate_interfaces.py
-python3 scripts/validate_roles.py
-python3 scripts/smoke_install.py --host claude-code
-claude plugin validate dist/claude-code
-python3.11 -m unittest discover -s tests -t .   # any 3.11+, for tomllib
-```
+## Development
 
-Each of the ones after the suite exists because the suite alone has been green
-over a real defect:
+Never edit generated agents or `dist/` by hand.
 
-- The tests read the manifests but not the host's own schema for them, so a
-  manifest that disagrees with
-  itself passes them cleanly. A version bump moved `plugin.json` and left the
-  marketplace entry behind, and only `claude plugin validate` noticed.
-- `--check` is per host, and both hosts are now gated. A `hosts/codex.json`
-  change leaves Claude Code's bundle in sync and `dist/codex/` stale, which is
-  why CI runs the byte check for each.
-- A byte-perfect Codex bundle can still be unusable: Codex needs an explicit
-  bootstrap, so the suite runs `install.py` from a copy of the built bundle
-  with nothing else on the path. `--check` proves the copy was faithful, never
-  that the result can act.
-- `smoke_install.py` is the only gate that runs the **host** against the
-  artifact. Everything above reasons about files; this installs the built
-  bundle into a throwaway `HOME` and asks Claude Code to enumerate what it
-  found, failing unless every role in `roles/` came back as an agent, the skill
-  came back as a skill, and every event in `hooks/hooks.json` came back
-  registered with its script actually present. A bundle can be byte-perfect and
-  still not load — a manifest the host parses but rejects, a skill folder whose
-  name stopped matching its frontmatter — and no file comparison catches that.
-  It never touches your own plugin config, so it is safe to run locally.
-- `build_adapter.py --check` covers the *bundle*, not just the agent files. It
-  rebuilds into a temporary directory and compares byte for byte, because a
-  path-to-hash manifest proves a bundle is internally consistent and not that
-  it agrees with the source it came from — a bundle built from stale sources
-  hashes perfectly. Change anything under `scripts/`, `schemas/`, `hooks/` or
-  `references/` and `dist/claude-code/` is stale until you rebuild it.
-- `validate_interfaces.py` is the only gate that asks where a claim *came
-  from*. Every other gate checks that files agree with each other; this one
-  checks that what they agree on was ever sourced. Each
-  `adapters/<host>/agent-interface.json` records what that host offers with
-  per-claim provenance, and the gate refuses a role that depends on anything
-  marked `unsourced` — plus any drift between an interface and the
-  `hosts/*.json` the renderer actually reads. It exists because two review
-  sessions and four reviewer passes once argued about `disallowedTools`
-  precedence and MCP tool namespacing entirely from inference, reached two
-  confident and partly wrong conclusions, and nothing in the repository could
-  settle it. Absence from a corpus is not absence from an interface, and the
-  `unsourced` level is how that distinction stays writable.
-- The Codex agents are TOML, and `tomllib` is 3.11+. On a 3.10 interpreter with
-  no `tomli` installed, every parser-backed assertion **skips** — so a
-  generated manifest that no TOML parser would accept can ship green. Install
-  `tomli`, or run the suite once on 3.11+. The suite prints an explicit skip
-  naming what went unverified rather than passing silently.
-
-That last point is the outcome gate's own rule applied to this repo: a test
-suite only checks what it was written to check, and generated output is exactly
-the kind of artifact it can miss.
-
-`.github/workflows/outcome-gate.yml` runs all of them on every push and pull
-request, so the gate no longer depends on a contributor remembering it. Run
-them locally anyway — CI is the backstop, not the first line. The workflow
-refuses to run as root: the five tests that prove an unreadable dispatch state
-denies do it with `chmod 000`, root bypasses permission bits, and a suite that
-skips them still reports `OK`. A gate that silently covers only
-part of the suite is the fail-open this repo's guards exist to close.
-
-## What the hooks enforce
-
-**`root_write_guard.py`** refuses a root-session `Edit`/`Write` on a path the
-open dispatch owns. Root writing product code around a stalled worker is a
-failed delegation with the evidence trail deleted — no RED count, no diff for
-the validators, no attempt recorded. The guard is narrow about what it protects:
-it fires only from the root session, and only on the open dispatch's own
-`write_paths`.
-
-It also fails closed on state it cannot trust. A dispatch record that is
-unreadable, unparseable, or structurally invalid blocks the write instead of
-reading as "no delegation open", and so does finding state files when
-`dispatch_state` cannot be imported at all — otherwise deleting `scripts/` would
-switch the guard off. The deny names the offending file and points at
-`dispatch_state.py verify`, which reports every record and exits non-zero if any
-is corrupt.
-
-Malformed *hook input* is the deliberate exception: it allows. A payload the
-guard cannot parse or make sense of is not evidence that a delegation is open,
-and blocking on it would break every write in every project that installs this
-plugin. Untrustworthy state denies; unreadable input allows.
-
-**`worker_git_guard.py`** refuses Git mutation inside a worker, refuses any
-shell at all inside the read-only validator, and refuses edits inside either
-validator. Read-only Git inspection stays allowed.
-
-Both are keyed on the `agent_type` the PreToolUse payload carries, which arrives
-namespaced as `root-architect-execution:impl-executor` for a plugin-provided
-agent and bare for a project-local copy. Both forms are recognised, so the
-guards also cover a project that vendors these agent files directly.
-
-## Changing a role
-
-Never edit `agents/` or `dist/` by hand — the capability gate fails on drift,
-because a hand-edited agent file silently disagrees with the manifest every
-checkpoint quotes.
+For example, to change a role:
 
 ```bash
 $EDITOR roles/impl-executor.json
+
 python3 scripts/render_agents.py --host claude-code
+python3 scripts/render_agents.py --host codex
+
 python3 scripts/validate_roles.py
+
+python3 scripts/build_adapter.py --host claude-code
+python3 scripts/build_adapter.py --host codex
 ```
 
-## Adding a host
+See [`docs/03-engineering/development.md`](./docs/03-engineering/development.md) before changing declarations, host interfaces, guards, schemas, or packaging.
 
-See [references/agents/README.md](references/agents/README.md). The short
-version: write `hosts/<name>.json`, give every capability a `verified` note —
-including every `supported: false` — render, and gate. A capability the host
-cannot express becomes a disclosure in the generated file, never a silent drop.
+## Verification
 
-`hosts/cursor.json` is carried from the reference project and marked
-inherited; the capability gate prints a warning for it until someone
-re-verifies it against that host's own documentation. `hosts/codex.json` was
-re-verified against the Codex subagent and hooks documentation and codex-cli
-0.147.0, and `hosts/claude-code.json` against the Claude Code subagent and
-plugin references — see [[Claude Code Subagent Contract]] in the vault for the
-latter, with provenance per claim. A host is flagged by the gate when its
-`source` begins `INHERITED`, so the warning and this paragraph cannot drift
-apart silently.
+The repository's outcome gate is intentionally broader than its unit test suite:
+
+```bash
+python3 -m unittest discover -s tests -t .
+
+python3 scripts/render_agents.py --host claude-code --check
+python3 scripts/render_agents.py --host codex --check
+
+python3 scripts/build_adapter.py --host claude-code --check
+python3 scripts/build_adapter.py --host codex --check
+
+python3 scripts/validate_interfaces.py
+python3 scripts/validate_roles.py
+
+python3 scripts/smoke_install.py --host claude-code
+claude plugin validate dist/claude-code
+
+python3.11 -m unittest discover -s tests -t .
+```
+
+The final Python 3.11+ run ensures TOML-backed Codex assertions execute with `tomllib`.
+
+The same outcome gate runs in GitHub Actions on pushes to `master` and pull requests.
+
+For the rationale behind each layer, see [`docs/03-engineering/testing.md`](./docs/03-engineering/testing.md).
+
+## Security model
+
+The security boundary is primarily about **authority and mutation**, not network perimeter security.
+
+Key rules include:
+
+- root owns Git; workers do not commit;
+- implementers may write only their brief-scoped paths;
+- specification validators are read-only and have no shell;
+- quality validators can inspect and run approved commands but cannot edit;
+- untrusted durable dispatch state fails closed;
+- generated artifacts and installable bundles are checked against their sources;
+- destructive Git/release operations require explicit owner authorization.
+
+See [`docs/05-security/security.md`](./docs/05-security/security.md) and [`docs/05-security/threat-model.md`](./docs/05-security/threat-model.md).
+
+## Current project status
+
+The authoritative status is maintained in [`HANDOFF.md`](./HANDOFF.md) and [`docs/06-delivery/roadmap.md`](./docs/06-delivery/roadmap.md).
+
+The current architecture includes the root execution protocol, declared roles, schema-checked runtime contracts, generated Claude Code and Codex adapters, durable dispatch state, runtime guards, bundle validation, smoke installation, and CI outcome gating.
+
+Live end-to-end evidence should remain distinguished from intended protocol behavior. Consult the handoff before assuming that every execution path has been observed in a real host run.
+
+## Contributing
+
+Before submitting a change:
+
+1. Modify authoritative source rather than generated output.
+2. Add or update targeted regression tests.
+3. Regenerate affected host agents.
+4. Rebuild affected host bundles.
+5. Run the complete outcome gate.
+6. Update documentation when a contract, capability, workflow, or operational procedure changes.
+
+Contributor onboarding is available at [`docs/07-guides/onboarding.md`](./docs/07-guides/onboarding.md).
+
+## Documentation standard
+
+This repository uses a reusable software-project documentation interface organized around:
+
+```text
+product -> architecture -> design -> engineering
+        -> operations -> security -> delivery -> guides
+```
+
+Reusable document templates are available in [`docs/_templates/`](./docs/_templates/).
+
+---
+
+For architecture details, start with **[`docs/README.md`](./docs/README.md)**.
