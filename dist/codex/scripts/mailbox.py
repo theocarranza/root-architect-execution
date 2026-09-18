@@ -27,9 +27,9 @@ Four properties this script exists to make true rather than to request:
     mailbox.py seal-failure --run-id R --from worker:implementer \\
                     --failure-mode killed
 """
+
 import argparse
 import hashlib
-import json
 import re
 import sys
 from datetime import datetime, timezone
@@ -88,7 +88,7 @@ def parse_envelope(raw):
         raise MailboxError("envelope header is never closed")
 
     header = {}
-    for line in text[len(HEADER_OPEN):end].split("\n"):
+    for line in text[len(HEADER_OPEN) : end].split("\n"):
         if not line.strip():
             continue
         match = HEADER_LINE.match(line)
@@ -97,7 +97,7 @@ def parse_envelope(raw):
         key, value = match.group(1), match.group(2)
         header[key] = int(value) if key in INTEGER_KEYS and value.isdigit() else value
 
-    body = raw[len((text[:end] + HEADER_CLOSE).encode("utf-8")):]
+    body = raw[len((text[:end] + HEADER_CLOSE).encode("utf-8")) :]
     return header, body
 
 
@@ -107,13 +107,15 @@ def validate_header(header):
     except SchemaError as exc:
         raise MailboxError("the envelope schema itself will not load: %s" % exc)
     if problems:
-        raise MailboxError("envelope header is not schema-conformant: %s"
-                           % "; ".join(str(p) for p in problems))
+        raise MailboxError(
+            "envelope header is not schema-conformant: %s" % "; ".join(str(p) for p in problems)
+        )
     if header["kind"] == "failure" and not header.get("failure_mode"):
         raise MailboxError(
             "a failure envelope must name its failure_mode - 'the worker "
             "failed' without saying how is the silence this envelope exists "
-            "to replace")
+            "to replace"
+        )
     if header["kind"] != "failure" and header.get("failure_mode"):
         raise MailboxError("failure_mode belongs only on a failure envelope")
 
@@ -141,13 +143,15 @@ def next_seq(directory):
             raise MailboxError(
                 "cannot number a new envelope: %s will not parse (%s). Repair "
                 "or remove it first - numbering around an unreadable envelope "
-                "silently reuses a sequence number." % (path.name, exc))
+                "silently reuses a sequence number." % (path.name, exc)
+            )
         highest = max(highest, int(header.get("seq", 0)))
     return highest + 1
 
 
-def post(workspace, run_id, kind, sender, recipient, persisted_by, body,
-         failure_mode=None, seq=None):
+def post(
+    workspace, run_id, kind, sender, recipient, persisted_by, body, failure_mode=None, seq=None
+):
     directory = mailbox_dir(workspace, run_id)
     directory.mkdir(parents=True, exist_ok=True)
     seq = next_seq(directory) if seq is None else seq
@@ -172,7 +176,8 @@ def post(workspace, run_id, kind, sender, recipient, persisted_by, body,
         raise MailboxError(
             "%s already exists. Envelopes are append-only: a run that needs to "
             "correct an earlier one posts a new envelope saying so, because a "
-            "rewritten history cannot be told from an accurate one." % path.name)
+            "rewritten history cannot be told from an accurate one." % path.name
+        )
 
     with path.open("wb") as handle:
         handle.write(render_header(header).encode("utf-8"))
@@ -213,16 +218,17 @@ def verify(workspace, run_id):
             problems.append(
                 "%s: body does not match its recorded hash - the envelope was "
                 "edited after it was written, so nothing in this run's record "
-                "can be trusted verbatim" % name)
+                "can be trusted verbatim" % name
+            )
 
         if header["run_id"] != run_id:
-            problems.append("%s: filed under run %s but claims run %s"
-                            % (name, run_id, header["run_id"]))
+            problems.append(
+                "%s: filed under run %s but claims run %s" % (name, run_id, header["run_id"])
+            )
 
         seq = int(header["seq"])
         if seq in seen_seq:
-            problems.append("%s: reuses seq %d, already taken by %s"
-                            % (name, seq, seen_seq[seq]))
+            problems.append("%s: reuses seq %d, already taken by %s" % (name, seq, seen_seq[seq]))
         seen_seq[seq] = name
 
         if header["kind"] == "task":
@@ -235,8 +241,8 @@ def verify(workspace, run_id):
             problems.append(
                 "%s was dispatched to %s and nothing came back. Silence is not "
                 "success: seal it with a failure envelope naming the mode, or "
-                "the run records a task that simply stopped existing."
-                % (task_name, worker))
+                "the run records a task that simply stopped existing." % (task_name, worker)
+            )
 
     return problems
 
@@ -249,8 +255,16 @@ def _fail(message):
 def cmd_post(args):
     body = Path(args.body_file).read_bytes() if args.body_file else b""
     try:
-        path = post(args.workspace, args.run_id, args.kind, getattr(args, "from"),
-                    args.to, args.persisted_by, body, args.failure_mode)
+        path = post(
+            args.workspace,
+            args.run_id,
+            args.kind,
+            getattr(args, "from"),
+            args.to,
+            args.persisted_by,
+            body,
+            args.failure_mode,
+        )
     except MailboxError as exc:
         return _fail(str(exc))
     print("posted %s" % path)
@@ -267,8 +281,16 @@ def cmd_seal_failure(args):
         "failure mode: %s\n" % (getattr(args, "from"), args.failure_mode)
     ).encode("utf-8")
     try:
-        path = post(args.workspace, args.run_id, "failure", getattr(args, "from"),
-                    "orchestrator", "orchestrator", body, args.failure_mode)
+        path = post(
+            args.workspace,
+            args.run_id,
+            "failure",
+            getattr(args, "from"),
+            "orchestrator",
+            "orchestrator",
+            body,
+            args.failure_mode,
+        )
     except MailboxError as exc:
         return _fail(str(exc))
     print("sealed %s" % path)
@@ -283,10 +305,17 @@ def cmd_list(args):
     if not entries:
         print("no envelopes for run %s" % args.run_id)
         return 0
-    for path, header, body in entries:
-        print("%4s  %-8s %-24s -> %-14s %d bytes"
-              % (header.get("seq"), header.get("kind"), header.get("from"),
-                 header.get("to"), len(body)))
+    for _path, header, body in entries:
+        print(
+            "%4s  %-8s %-24s -> %-14s %d bytes"
+            % (
+                header.get("seq"),
+                header.get("kind"),
+                header.get("from"),
+                header.get("to"),
+                len(body),
+            )
+        )
     return 0
 
 
@@ -295,12 +324,13 @@ def cmd_verify(args):
     if problems:
         for problem in problems:
             print("  %s" % problem, file=sys.stderr)
-        print("\n%d problem(s) in run %s" % (len(problems), args.run_id),
-              file=sys.stderr)
+        print("\n%d problem(s) in run %s" % (len(problems), args.run_id), file=sys.stderr)
         return 1
     count = len(envelope_paths(mailbox_dir(args.workspace, args.run_id)))
-    print("run %s is sound: %d envelope(s), every body matches its hash, every "
-          "dispatched task answered" % (args.run_id, count))
+    print(
+        "run %s is sound: %d envelope(s), every body matches its hash, every "
+        "dispatched task answered" % (args.run_id, count)
+    )
     return 0
 
 
@@ -311,8 +341,9 @@ def main(argv=None):
 
     post_p = sub.add_parser("post")
     post_p.add_argument("--run-id", required=True)
-    post_p.add_argument("--kind", required=True,
-                        choices=["task", "report", "failure", "question", "answer"])
+    post_p.add_argument(
+        "--kind", required=True, choices=["task", "report", "failure", "question", "answer"]
+    )
     post_p.add_argument("--from", required=True)
     post_p.add_argument("--to", required=True)
     post_p.add_argument("--persisted-by", required=True)

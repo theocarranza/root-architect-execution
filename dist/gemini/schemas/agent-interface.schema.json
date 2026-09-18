@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://root-architect-execution/schemas/agent-interface.schema.json",
+  "title": "Host agent interface",
+  "description": "What a host's agent definition format actually offers, described independently of this plugin's use of it. This file answers 'what can the host express?'; hosts/<host>.json answers 'how does our role vocabulary map onto it?'. Keeping them apart is the point: the previous conflation is why interface questions were settled by argument instead of by reading. Every claim carries its own provenance, and a claim whose provenance is 'unsourced' may not be depended upon by any role.",
+  "type": "object",
+  "required": ["host", "retrieved", "definition", "fields", "delegation", "mailbox"],
+  "additionalProperties": false,
+  "properties": {
+    "host": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "retrieved": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "When this interface was last read from its sources. Per-claim provenance carries its own date; this is the date of the whole sweep."
+    },
+    "definition": {
+      "type": "object",
+      "required": ["format", "locations", "provenance"],
+      "additionalProperties": false,
+      "description": "How an agent is defined on this host, and where the host looks for it.",
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["markdown-yaml", "toml", "sdk-object", "none"],
+          "description": "'none' means the host has no agent definition format that this project could find. It is not a synonym for 'we did not look' - that is what an unsourced provenance says."
+        },
+        "locations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Paths the host scans, in the host's own convention. Empty where format is 'none'."
+        },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "fields": {
+      "type": "object",
+      "description": "Every frontmatter or config key the host's agent definition accepts, keyed by the host's own spelling. A key absent from this object is not a key the host lacks - it is a key nobody has sourced. Declare it with supported:false and an unsourced provenance rather than leaving it out, whenever its absence would otherwise be read as evidence.",
+      "additionalProperties": { "$ref": "#/$defs/field" }
+    },
+    "delegation": {
+      "type": "object",
+      "required": ["supported", "nested", "provenance"],
+      "additionalProperties": false,
+      "description": "Whether an agent on this host can dispatch another agent, and whether an agent so dispatched can dispatch in turn. Nested delegation is the capability the orchestrated-worker topology rests on, so it is declared separately from the tool that performs it.",
+      "properties": {
+        "supported": { "type": "boolean" },
+        "mechanism": {
+          "type": ["string", "null"],
+          "description": "How delegation is granted or withheld, in the host's own terms. Required when supported is true."
+        },
+        "nested": {
+          "type": "object",
+          "required": ["supported", "provenance"],
+          "additionalProperties": false,
+          "description": "Can a dispatched agent dispatch further? 'supported: false' must mean the host documents or demonstrates that it cannot, never that no source was found - use an unsourced provenance for that.",
+          "properties": {
+            "supported": { "type": ["boolean", "null"] },
+            "gate": {
+              "type": ["string", "null"],
+              "description": "What decides whether a given agent may nest."
+            },
+            "max_depth": {
+              "type": ["integer", "null"],
+              "description": "A documented hard cap, if the host states one. Null where no cap was sourced. A number repeated by search engines but absent from the host's own material is not a source."
+            },
+            "provenance": { "$ref": "#/$defs/provenance" }
+          }
+        },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "mailbox": {
+      "type": "object",
+      "required": ["supported", "provenance"],
+      "additionalProperties": false,
+      "description": "Whether the host natively carries messages between running agents. Where false, a portable envelope must supply it; where true, reimplementing one duplicates something the host already does better.",
+      "properties": {
+        "supported": { "type": "boolean" },
+        "mechanism": { "type": ["string", "null"] },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Free prose that does not fit a field: version skew, migrations, traps. Never load-bearing - nothing reads these."
+    }
+  },
+  "$defs": {
+    "field": {
+      "type": "object",
+      "required": ["supported", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "supported": { "type": "boolean" },
+        "type": {
+          "type": ["string", "null"],
+          "enum": ["string", "boolean", "integer", "list", "object", "enum", null]
+        },
+        "values": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "The accepted values, where the host documents a closed set. Null where free-form or unsourced. A value observed in somebody's repository is not a documented value; put those in notes."
+        },
+        "default": {
+          "type": ["string", "null"],
+          "description": "What the host does when the key is omitted, stated as behaviour rather than as a literal where the two differ. 'Inherits every tool available to subagents' is the useful form; 'null' is not."
+        },
+        "semantics": {
+          "type": ["string", "null"],
+          "description": "What the key does, in the host's terms. Precedence and interaction with other keys belong here - they are exactly what gets argued about when undeclared."
+        },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["level"],
+      "additionalProperties": false,
+      "description": "Where a claim came from and how much weight it bears. The enum is ordered by strength, and the ordering is the point: a claim may only be relied upon at the strength of its weakest supporting source.",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "first-party-doc",
+            "first-party-source",
+            "empirically-verified",
+            "corpus-derived",
+            "unsourced"
+          ],
+          "description": "first-party-doc: the vendor's own documentation. first-party-source: the vendor's own code, changelog or schema. empirically-verified: observed directly on the host by this project. corpus-derived: inferred from a sample of real definition files - evidence of what is USED, never of what is SUPPORTED. unsourced: nothing was found; no role may depend on this."
+        },
+        "source": {
+          "type": ["string", "null"],
+          "description": "URL, repository path, or the command whose output was read. Required unless level is unsourced."
+        },
+        "retrieved": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "quote": {
+          "type": ["string", "null"],
+          "description": "The source's own words, verbatim. Required for first-party-doc and first-party-source: a paraphrase is where inference re-enters, and re-entering is what this whole file exists to prevent."
+        },
+        "sample_size": {
+          "type": ["integer", "null"],
+          "description": "How many real files the inference rests on. Required for corpus-derived."
+        },
+        "caveat": {
+          "type": ["string", "null"],
+          "description": "What would make this claim wrong, or what could not be checked. Recording a known weakness here is always better than omitting the claim."
+        }
+      }
+    }
+  }
+}

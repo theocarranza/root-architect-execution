@@ -25,6 +25,7 @@ Exit 0 means the return is well-formed. Exit 1 means send it back; that
 corrective retry does not consume an implementation attempt, because nothing
 was implemented differently.
 """
+
 import argparse
 import json
 import re
@@ -51,22 +52,23 @@ def extract(text):
         stripped = text.strip()
         if stripped.startswith("{"):
             return stripped, None
-        return None, ("no fenced json block found; the contract is one fenced "
-                      "```json block and nothing else")
+        return None, (
+            "no fenced json block found; the contract is one fenced ```json block and nothing else"
+        )
     if len(blocks) > 1:
-        return None, ("found %d fenced blocks; return exactly one"
-                      % len(blocks))
+        return None, ("found %d fenced blocks; return exactly one" % len(blocks))
     return blocks[0], None
 
 
 def cross_field_errors(payload, role, task, attempt):
     errors = []
     if task and payload.get("task") != task:
-        errors.append("task: returned %r but root dispatched %r"
-                      % (payload.get("task"), task))
+        errors.append("task: returned %r but root dispatched %r" % (payload.get("task"), task))
     if attempt and payload.get("attempt") != attempt:
-        errors.append("attempt: returned %r but root dispatched attempt %r"
-                      % (payload.get("attempt"), attempt))
+        errors.append(
+            "attempt: returned %r but root dispatched attempt %r"
+            % (payload.get("attempt"), attempt)
+        )
 
     if role == "implementer":
         if payload.get("status") == "DONE":
@@ -76,13 +78,13 @@ def cross_field_errors(payload, role, task, attempt):
                     errors.append(
                         "tests.%s: a DONE report must carry observed %s counts; "
                         "a test written after the implementation proves nothing "
-                        "about whether it can fail" % (phase, phase.upper()))
+                        "about whether it can fail" % (phase, phase.upper())
+                    )
         return errors
 
     returned_role = payload.get("role")
     if returned_role != role:
-        errors.append("role: returned %r but root dispatched %r"
-                      % (returned_role, role))
+        errors.append("role: returned %r but root dispatched %r" % (returned_role, role))
     findings = payload.get("findings")
     status = payload.get("status")
     if status == "PASS" and findings:
@@ -90,39 +92,42 @@ def cross_field_errors(payload, role, task, attempt):
     if status == "FINDINGS" and not findings:
         errors.append("status: FINDINGS must carry at least one finding")
     if role == "spec-validator" and payload.get("commands_rerun"):
-        errors.append("commands_rerun: the plan-compliance validator has no "
-                      "shell by design; a non-empty rerun list means the two "
-                      "review roles were combined in one agent")
+        errors.append(
+            "commands_rerun: the plan-compliance validator has no "
+            "shell by design; a non-empty rerun list means the two "
+            "review roles were combined in one agent"
+        )
     if role == "quality-validator":
         for i, finding in enumerate(findings or []):
             if not finding.get("failure_scenario"):
-                errors.append("findings[%d].failure_scenario: a quality finding "
-                              "needs concrete inputs or state and the wrong "
-                              "output that follows" % i)
+                errors.append(
+                    "findings[%d].failure_scenario: a quality finding "
+                    "needs concrete inputs or state and the wrong "
+                    "output that follows" % i
+                )
     return errors
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--role", required=True, choices=sorted(CONTRACT))
-    parser.add_argument("--file", required=True,
-                        help="file holding the worker's reply, or '-' for stdin")
+    parser.add_argument(
+        "--file", required=True, help="file holding the worker's reply, or '-' for stdin"
+    )
     parser.add_argument("--task")
     parser.add_argument("--attempt", type=int)
     args = parser.parse_args(argv)
 
-    text = sys.stdin.read() if args.file == "-" else \
-        Path(args.file).read_text(encoding="utf-8")
+    text = sys.stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8")
 
     raw, problem = extract(text)
-    if problem:
-        print("malformed return: %s" % problem, file=sys.stderr)
+    if problem or raw is None:
+        print("malformed return: %s" % (problem or "no return block"), file=sys.stderr)
         return 1
     try:
         payload = json.loads(raw)
     except ValueError as exc:
-        print("malformed return: block is not valid JSON: %s" % exc,
-              file=sys.stderr)
+        print("malformed return: block is not valid JSON: %s" % exc, file=sys.stderr)
         return 1
 
     errors = Validator(SCHEMAS / CONTRACT[args.role]).validate(payload)
@@ -137,8 +142,10 @@ def main(argv=None):
     if args.role == "implementer":
         print("well-formed implementer report: %s" % summary)
     else:
-        print("well-formed %s verdict: %s (%d findings)"
-              % (args.role, summary, len(payload.get("findings") or [])))
+        print(
+            "well-formed %s verdict: %s (%d findings)"
+            % (args.role, summary, len(payload.get("findings") or []))
+        )
     return 0
 
 
