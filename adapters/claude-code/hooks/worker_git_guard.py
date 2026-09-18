@@ -20,11 +20,13 @@ Blocks, inside a worker:
 Allows read-only Git inspection (status, diff, log, show, rev-parse) — a worker
 often needs to see what it changed to write its own diff summary.
 """
+
 import json
 import os
 import re
 import shlex
 import sys
+from typing import NoReturn
 
 ROLE_BY_AGENT = {
     "impl-executor": "implementer",
@@ -33,14 +35,48 @@ ROLE_BY_AGENT = {
 }
 
 MUTATING_GIT = {
-    "commit", "add", "stage", "push", "reset", "rebase", "merge", "tag",
-    "checkout", "switch", "restore", "cherry-pick", "revert", "stash",
-    "clean", "am", "apply", "mv", "rm", "branch", "remote", "fetch", "pull",
-    "worktree", "gc", "filter-branch", "update-ref", "symbolic-ref", "notes",
+    "commit",
+    "add",
+    "stage",
+    "push",
+    "reset",
+    "rebase",
+    "merge",
+    "tag",
+    "checkout",
+    "switch",
+    "restore",
+    "cherry-pick",
+    "revert",
+    "stash",
+    "clean",
+    "am",
+    "apply",
+    "mv",
+    "rm",
+    "branch",
+    "remote",
+    "fetch",
+    "pull",
+    "worktree",
+    "gc",
+    "filter-branch",
+    "update-ref",
+    "symbolic-ref",
+    "notes",
 }
 READ_ONLY_GIT = {
-    "status", "diff", "log", "show", "rev-parse", "ls-files", "blame",
-    "describe", "shortlog", "cat-file", "config",
+    "status",
+    "diff",
+    "log",
+    "show",
+    "rev-parse",
+    "ls-files",
+    "blame",
+    "describe",
+    "shortlog",
+    "cat-file",
+    "config",
 }
 
 SHELL_SPLIT = re.compile(r"(?:&&|\|\||;|\||\n)")
@@ -64,7 +100,7 @@ def role_for(agent_type):
     return ROLE_BY_AGENT.get(agent_type.rsplit(":", 1)[-1])
 
 
-def _allow():
+def _allow() -> NoReturn:
     sys.exit(0)
 
 
@@ -82,7 +118,7 @@ def _report(stream, text):
         pass
 
 
-def _deny(reason):
+def _deny(reason: str) -> NoReturn:
     """Unconditionally terminal: exit 2 whatever the streams do.
 
     Same contract as root_write_guard._deny, and for the same reason. A plain
@@ -96,13 +132,19 @@ def _deny(reason):
     So: write and flush both streams under their own handling, then leave via
     os._exit, which cannot be re-entered and runs no shutdown flush.
     """
-    _report(sys.stdout, json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
-    }) + "\n")
+    _report(
+        sys.stdout,
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+        + "\n",
+    )
     _report(sys.stderr, reason + "\n")
     os._exit(2)
 
@@ -117,7 +159,7 @@ def git_subcommands(command):
         for i, word in enumerate(words):
             if word.rsplit("/", 1)[-1] != "git":
                 continue
-            for candidate in words[i + 1:]:
+            for candidate in words[i + 1 :]:
                 if candidate.startswith("-"):
                     continue
                 yield candidate
@@ -148,7 +190,8 @@ def main():
         _deny(
             "Worker guard: an internal error occurred while checking this "
             "call inside a worker, so it cannot be verified safe:\n  %r\n"
-            "This guard fails closed on internal errors, never open." % (e,))
+            "This guard fails closed on internal errors, never open." % (e,)
+        )
 
 
 def _main():
@@ -179,7 +222,8 @@ def _main():
         _deny(
             "Worker guard: this call arrived inside the %s worker with a "
             "tool name this guard cannot read (%r), so it cannot be proven "
-            "not to be a Git call. This guard fails closed." % (role, tool))
+            "not to be a Git call. This guard fails closed." % (role, tool)
+        )
 
     if role == "spec-validator":
         if tool in {"Bash", "BashOutput", "KillShell", "PowerShell"}:
@@ -187,17 +231,27 @@ def _main():
                 "Worker guard: the plan-compliance validator is dispatched "
                 "read-only with no shell. Reaching one means the tool grant "
                 "leaked. If a command needs running, that is the quality "
-                "validator's job — record it as a finding instead.")
+                "validator's job — record it as a finding instead."
+            )
         if tool in {"Edit", "Write", "NotebookEdit", "MultiEdit", "apply_patch"}:
-            _deny("Worker guard: the plan-compliance validator fixes nothing. "
-                  "Report a finding; root re-briefs the implementer.")
+            _deny(
+                "Worker guard: the plan-compliance validator fixes nothing. "
+                "Report a finding; root re-briefs the implementer."
+            )
         _allow()
 
-    if role == "quality-validator" and tool in {"Edit", "Write", "NotebookEdit",
-                                                "MultiEdit", "apply_patch"}:
-        _deny("Worker guard: the quality validator fixes nothing. Report the "
-              "defect with a concrete failure scenario; root re-briefs the "
-              "implementer.")
+    if role == "quality-validator" and tool in {
+        "Edit",
+        "Write",
+        "NotebookEdit",
+        "MultiEdit",
+        "apply_patch",
+    }:
+        _deny(
+            "Worker guard: the quality validator fixes nothing. Report the "
+            "defect with a concrete failure scenario; root re-briefs the "
+            "implementer."
+        )
 
     if tool != "Bash":
         _allow()
@@ -214,7 +268,8 @@ def _main():
                 "makes the task's diff reviewable. Report the work in your "
                 "return and let root stage it.\n"
                 "Read-only inspection (status, diff, log, show, rev-parse) is "
-                "allowed." % (sub, role))
+                "allowed." % (sub, role)
+            )
     _allow()
 
 

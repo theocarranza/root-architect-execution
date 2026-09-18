@@ -6,6 +6,7 @@ suite — the mini validator is checked through the contracts that use it.
 
     python3 -m unittest discover -s tests -t .
 """
+
 import contextlib
 import json
 import os
@@ -29,25 +30,28 @@ HOOKS = ROOT / "adapters" / "claude-code" / "hooks"
 CLAUDE_AGENTS = ROOT / "adapters" / "claude-code" / "agents"
 sys.path.insert(0, str(SCRIPTS))
 
-from jsonschema_mini import Validator  # noqa: E402
-from dispatch_state import DispatchStateError  # noqa: E402
-import render_agents  # noqa: E402
-
 # The Codex installer is a host MECHANIC, not a shared script, so it is loaded
 # by path rather than imported off sys.path. Putting adapters/codex/ on the
 # path would also make every other host's mechanics importable by bare name,
 # which is the coupling the adapter directories exist to prevent.
 import importlib.util  # noqa: E402
+
+import render_agents  # noqa: E402
+from dispatch_state import DispatchStateError  # noqa: E402
+from jsonschema_mini import Validator  # noqa: E402
+
 _spec = importlib.util.spec_from_file_location(
-    "codex_install", ROOT / "adapters" / "codex" / "install.py")
+    "codex_install", ROOT / "adapters" / "codex" / "install.py"
+)
 install_codex = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(install_codex)
-import build_adapter  # noqa: E402
-import smoke_install  # noqa: E402
-import validate_interfaces  # noqa: E402
 import mailbox  # noqa: E402
+
+import build_adapter  # noqa: E402
 import job_queue  # noqa: E402
 import root_preflight  # noqa: E402
+import smoke_install  # noqa: E402
+import validate_interfaces  # noqa: E402
 
 
 @contextlib.contextmanager
@@ -68,8 +72,8 @@ def mock_adapters(directory):
 
 def run(script, args, stdin=None):
     return subprocess.run(
-        [sys.executable, str(script)] + args,
-        input=stdin, capture_output=True, text=True)
+        [sys.executable, str(script)] + args, input=stdin, capture_output=True, text=True
+    )
 
 
 def make_corrupted_copy(tmp_dir, schema_name, contents, include_hooks=False):
@@ -115,21 +119,33 @@ def valid_brief(**overrides):
 
 def valid_report(**overrides):
     report = {
-        "task": "T", "attempt": 1, "model": "haiku", "effort": "low",
-        "status": "DONE", "files_written": [], "files_modified": ["a.py"],
+        "task": "T",
+        "attempt": 1,
+        "model": "haiku",
+        "effort": "low",
+        "status": "DONE",
+        "files_written": [],
+        "files_modified": ["a.py"],
         "tests": {
             "red": {"command": "c", "counts": "1 failed"},
             "green": {"command": "c", "counts": "19 passed"},
         },
-        "diff_summary": "d", "notes": "",
+        "diff_summary": "d",
+        "notes": "",
     }
     report.update(overrides)
     return report
 
 
 def valid_verdict(**overrides):
-    verdict = {"task": "T", "attempt": 1, "role": "spec-validator",
-               "status": "PASS", "findings": [], "commands_rerun": []}
+    verdict = {
+        "task": "T",
+        "attempt": 1,
+        "role": "spec-validator",
+        "status": "PASS",
+        "findings": [],
+        "commands_rerun": [],
+    }
     verdict.update(overrides)
     return verdict
 
@@ -146,16 +162,14 @@ class MiniValidatorTests(unittest.TestCase):
     def test_rejects_missing_required_property(self):
         brief = valid_brief()
         del brief["constraints"]
-        self.assertTrue(any("constraints" in e
-                            for e in self.brief.validate(brief)))
+        self.assertTrue(any("constraints" in e for e in self.brief.validate(brief)))
 
     def test_rejects_unknown_property(self):
         errors = self.brief.validate(valid_brief(surprise=1))
         self.assertTrue(any("surprise" in e for e in errors))
 
     def test_rejects_attempt_above_the_cap(self):
-        self.assertTrue(any("maximum" in e
-                            for e in self.brief.validate(valid_brief(attempt=4))))
+        self.assertTrue(any("maximum" in e for e in self.brief.validate(valid_brief(attempt=4))))
 
     def test_rejects_absolute_and_escaping_write_paths(self):
         for bad in ("/etc/passwd", "../outside.py"):
@@ -166,30 +180,33 @@ class MiniValidatorTests(unittest.TestCase):
     def test_rejects_control_characters_in_write_paths(self):
         """A brief whose write_paths contain control characters (U+0000-U+001F, U+007F)
         must be rejected by the brief schema."""
-        for control_char in [chr(0), chr(1), '\t', '\n', chr(31), chr(127)]:
+        for control_char in [chr(0), chr(1), "\t", "\n", chr(31), chr(127)]:
             with self.subTest(control_char=repr(control_char)):
                 errors = self.brief.validate(
                     valid_brief(write_paths=["scripts/envelope.py", "bad" + control_char + "path"])
                 )
-                self.assertTrue(any("pattern" in e for e in errors),
-                              f"Schema should reject control char {repr(control_char)}")
+                self.assertTrue(
+                    any("pattern" in e for e in errors),
+                    f"Schema should reject control char {repr(control_char)}",
+                )
 
     def test_rejects_control_characters_in_read_paths(self):
         """A brief whose read_paths contain control characters (U+0000-U+001F, U+007F)
         must be rejected by the brief schema."""
-        for control_char in [chr(0), chr(1), '\t', '\n', chr(31), chr(127)]:
+        for control_char in [chr(0), chr(1), "\t", "\n", chr(31), chr(127)]:
             with self.subTest(control_char=repr(control_char)):
                 errors = self.brief.validate(
                     valid_brief(read_paths=["scripts/envelope.py", "bad" + control_char + "path"])
                 )
-                self.assertTrue(any("pattern" in e for e in errors),
-                              f"Schema should reject control char {repr(control_char)}")
+                self.assertTrue(
+                    any("pattern" in e for e in errors),
+                    f"Schema should reject control char {repr(control_char)}",
+                )
 
     def test_anyof_accepts_both_effort_forms(self):
         for effort in ("high", "not settable on this host"):
             with self.subTest(effort=effort):
-                self.assertEqual(
-                    self.brief.validate(valid_brief(effort=effort)), [])
+                self.assertEqual(self.brief.validate(valid_brief(effort=effort)), [])
 
     def test_anyof_rejects_an_invented_effort_level(self):
         self.assertNotEqual(self.brief.validate(valid_brief(effort="turbo")), [])
@@ -199,7 +216,6 @@ class MiniValidatorTests(unittest.TestCase):
 
 
 class RoleAndHostManifestTests(unittest.TestCase):
-
     def test_shipped_manifests_pass_the_capability_gate(self):
         result = run(SCRIPTS / "validate_roles.py", [])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -212,11 +228,11 @@ class RoleAndHostManifestTests(unittest.TestCase):
         for _, role in render_agents.load_roles():
             with self.subTest(role=role["id"]):
                 self.assertIn(role["model"]["default"], ("cheap", "mid", "strong"))
-                self.assertIn(role["reasoning"]["default"],
-                              ("low", "medium", "high", "xhigh", "max"))
+                self.assertIn(
+                    role["reasoning"]["default"], ("low", "medium", "high", "xhigh", "max")
+                )
                 self.assertTrue(role["tools"]["allow"])
-                self.assertIn(role["mutation"],
-                              ("read-only", "read-and-run", "write-scoped"))
+                self.assertIn(role["mutation"], ("read-only", "read-and-run", "write-scoped"))
 
     def test_only_the_orchestrator_may_delegate(self):
         """Was "no role may delegate", which was true until one had to.
@@ -227,9 +243,11 @@ class RoleAndHostManifestTests(unittest.TestCase):
         """
         for _, role in render_agents.load_roles():
             with self.subTest(role=role["id"]):
-                self.assertEqual("delegate" in role["tools"]["allow"],
-                                 role["kind"] in ("orchestrator", "root"),
-                                 role["id"])
+                self.assertEqual(
+                    "delegate" in role["tools"]["allow"],
+                    role["kind"] in ("orchestrator", "root"),
+                    role["id"],
+                )
 
     def test_read_only_role_granting_a_shell_fails_the_gate(self):
         """The contradiction the JSON Schema cannot see: both halves are valid."""
@@ -249,7 +267,6 @@ class RoleAndHostManifestTests(unittest.TestCase):
 
 
 class RenderTests(unittest.TestCase):
-
     def test_codex_manifest_and_skill_are_installable(self):
         manifest = json.loads((ROOT / "adapters/codex/manifest.template.json").read_text())
         self.assertEqual(manifest["name"], "root-architect-execution")
@@ -269,17 +286,20 @@ class RenderTests(unittest.TestCase):
         """
         try:
             import tomllib
+
             return tomllib
         except ImportError:
             pass
         try:
             import tomli
+
             return tomli
         except ImportError:
             self.skipTest(
                 "no TOML parser on this interpreter (tomllib needs 3.11+). "
                 "Generated Codex TOMLs are UNVERIFIED here; run the outcome "
-                "gate's python3.12 probe, or `pip install tomli`.")
+                "gate's python3.12 probe, or `pip install tomli`."
+            )
 
     def test_codex_render_is_parseable_and_uses_no_placeholder_when_installed(self):
         tomllib = self.toml_parser()
@@ -320,17 +340,29 @@ class RenderTests(unittest.TestCase):
             nested.mkdir()
             (nested / "id_rsa").write_text("key", encoding="utf-8")
             (target / ".root-architect-execution-codex.json").write_text(
-                json.dumps({"version": 1, "files": [
-                    "../../victim.txt", "../../home/id_rsa",
-                    "../victim.txt", "/etc/hostname", "impl-executor.toml",
-                ]}), encoding="utf-8")
+                json.dumps(
+                    {
+                        "version": 1,
+                        "files": [
+                            "../../victim.txt",
+                            "../../home/id_rsa",
+                            "../victim.txt",
+                            "/etc/hostname",
+                            "impl-executor.toml",
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             install_codex.materialize(target, ROOT)
 
-            self.assertTrue((project / "victim.txt").exists(),
-                            "a marker entry escaped the target directory")
-            self.assertTrue((nested / "id_rsa").exists(),
-                            "a marker entry escaped the target directory")
+            self.assertTrue(
+                (project / "victim.txt").exists(), "a marker entry escaped the target directory"
+            )
+            self.assertTrue(
+                (nested / "id_rsa").exists(), "a marker entry escaped the target directory"
+            )
 
     def test_codex_install_survives_a_malformed_marker(self):
         """A marker that is not a list of filenames must not abort the install.
@@ -339,20 +371,28 @@ class RenderTests(unittest.TestCase):
         marker had not been rewritten yet, so the next run inherited a stale
         ownership record.
         """
-        for payload in ('{"version": 1, "files": [1, 2]}',
-                        '{"version": 1, "files": 5}',
-                        '{"version": 1, "files": "impl-executor.toml"}',
-                        '{"version": 1}', '[]', 'null', 'not json at all'):
+        for payload in (
+            '{"version": 1, "files": [1, 2]}',
+            '{"version": 1, "files": 5}',
+            '{"version": 1, "files": "impl-executor.toml"}',
+            '{"version": 1}',
+            "[]",
+            "null",
+            "not json at all",
+        ):
             with self.subTest(marker=payload):
                 with tempfile.TemporaryDirectory() as tmp:
                     target = Path(tmp) / "agents"
                     target.mkdir()
                     (target / ".root-architect-execution-codex.json").write_text(
-                        payload, encoding="utf-8")
+                        payload, encoding="utf-8"
+                    )
                     _, names = install_codex.materialize(target, ROOT)
                     expected = sum(
-                        1 for _, role in render_agents.load_roles()
-                        if render_agents.role_targets_host(role, "codex")[0])
+                        1
+                        for _, role in render_agents.load_roles()
+                        if render_agents.role_targets_host(role, "codex")[0]
+                    )
                     self.assertEqual(len(names), expected)
 
     def test_codex_install_still_removes_a_file_it_owns(self):
@@ -365,8 +405,8 @@ class RenderTests(unittest.TestCase):
             unrelated = target / "user-agent.toml"
             unrelated.write_text('name = "user"\n', encoding="utf-8")
             (target / ".root-architect-execution-codex.json").write_text(
-                json.dumps({"version": 1, "files": ["retired-agent.toml"]}),
-                encoding="utf-8")
+                json.dumps({"version": 1, "files": ["retired-agent.toml"]}), encoding="utf-8"
+            )
 
             install_codex.materialize(target, ROOT)
 
@@ -384,8 +424,7 @@ class RenderTests(unittest.TestCase):
                 self.assertNotIn("inherit", head)
 
     def test_read_only_role_gets_no_write_or_shell_tool(self):
-        head = (CLAUDE_AGENTS / "spec-validator.md").read_text(
-            encoding="utf-8").split("---")[1]
+        head = (CLAUDE_AGENTS / "spec-validator.md").read_text(encoding="utf-8").split("---")[1]
         tools = [line for line in head.splitlines() if line.startswith("tools:")][0]
         for forbidden in ("Edit", "Write", "Bash"):
             self.assertNotIn(forbidden, tools)
@@ -393,8 +432,7 @@ class RenderTests(unittest.TestCase):
     def test_unenforceable_capability_becomes_a_disclosure(self):
         """Cursor cannot express a tool allowlist; the file must say so."""
         with tempfile.TemporaryDirectory() as tmp:
-            run(SCRIPTS / "render_agents.py",
-                ["--host", "cursor", "--out", tmp])
+            run(SCRIPTS / "render_agents.py", ["--host", "cursor", "--out", tmp])
             text = (Path(tmp) / "spec-validator.md").read_text(encoding="utf-8")
         self.assertIn("not enforced", text)
         self.assertIn("## Enforcement", text)
@@ -408,14 +446,15 @@ class RenderTests(unittest.TestCase):
 
     def test_check_detects_a_hand_edit(self):
         with tempfile.TemporaryDirectory() as tmp:
-            run(SCRIPTS / "render_agents.py",
-                ["--host", "claude-code", "--out", tmp])
+            run(SCRIPTS / "render_agents.py", ["--host", "claude-code", "--out", tmp])
             target = Path(tmp) / "impl-executor.md"
-            target.write_text(target.read_text(encoding="utf-8")
-                              .replace("model: haiku", "model: opus"),
-                              encoding="utf-8")
-            result = run(SCRIPTS / "render_agents.py",
-                         ["--host", "claude-code", "--out", tmp, "--check"])
+            target.write_text(
+                target.read_text(encoding="utf-8").replace("model: haiku", "model: opus"),
+                encoding="utf-8",
+            )
+            result = run(
+                SCRIPTS / "render_agents.py", ["--host", "claude-code", "--out", tmp, "--check"]
+            )
         self.assertEqual(result.returncode, 1)
         self.assertIn("out of sync", result.stderr)
 
@@ -424,13 +463,13 @@ class RenderTests(unittest.TestCase):
         # Check dist/ directory
         for toml_file in (ROOT / "dist" / "codex").glob("*.toml"):
             text = toml_file.read_text(encoding="utf-8")
-            self.assertNotIn("Allowed: .", text,
-                           f"Found malformed 'Allowed: .' in {toml_file.name}")
+            self.assertNotIn(
+                "Allowed: .", text, f"Found malformed 'Allowed: .' in {toml_file.name}"
+            )
         # Check agents/ directory
         for md_file in CLAUDE_AGENTS.glob("*.md"):
             text = md_file.read_text(encoding="utf-8")
-            self.assertNotIn("Allowed: .", text,
-                           f"Found malformed 'Allowed: .' in {md_file.name}")
+            self.assertNotIn("Allowed: .", text, f"Found malformed 'Allowed: .' in {md_file.name}")
 
     def test_empty_mapped_allow_list_uses_explicit_wording(self):
         """Test requirement (b): empty mapped allow list renders 'no host-enforced tools'."""
@@ -438,8 +477,7 @@ class RenderTests(unittest.TestCase):
         # but codex.json only maps edit-files, create-files, and run-commands
         # so spec-validator on codex has an empty mapped allow list
         with tempfile.TemporaryDirectory() as tmp:
-            run(SCRIPTS / "render_agents.py",
-                ["--host", "codex", "--out", tmp])
+            run(SCRIPTS / "render_agents.py", ["--host", "codex", "--out", tmp])
             text = (Path(tmp) / "spec-validator.toml").read_text(encoding="utf-8")
         self.assertIn("Allowed: no host-enforced tools.", text)
         self.assertNotIn("Allowed: .", text)
@@ -472,8 +510,9 @@ class RenderTests(unittest.TestCase):
         rendering error, not a silent drop".
         """
         host = self.unmappable_allowlist_host()
-        role_file, role = next((f, r) for f, r in render_agents.load_roles()
-                               if r["id"] == "spec-validator")
+        role_file, role = next(
+            (f, r) for f, r in render_agents.load_roles() if r["id"] == "spec-validator"
+        )
         with self.assertRaises(SystemExit) as caught:
             render_agents.render_markdown_yaml(role, host, role_file)
         message = str(caught.exception)
@@ -507,16 +546,17 @@ class RenderTests(unittest.TestCase):
         """
         host = render_agents.load_host("codex")
         role_file, role = render_agents.load_roles()[0]
-        for bad in ('/tmp/a"""root', "/tmp/a\\troot", '/tmp/pl"ain',
-                    '/tmp/end"""'):
+        for bad in ('/tmp/a"""root', "/tmp/a\\troot", '/tmp/pl"ain', '/tmp/end"""'):
             with self.subTest(plugin_root=bad):
-                text = render_agents.render_toml(
-                    role, dict(host, root_placeholder=bad), role_file)
+                text = render_agents.render_toml(role, dict(host, root_placeholder=bad), role_file)
                 body = text.split('developer_instructions = """\n', 1)[1]
                 body = body.rsplit('\n"""', 1)[0]
-                self.assertNotIn('"""', body,
-                                 "an unescaped triple quote ends the string "
-                                 "early and turns instructions into TOML")
+                self.assertNotIn(
+                    '"""',
+                    body,
+                    "an unescaped triple quote ends the string "
+                    "early and turns instructions into TOML",
+                )
                 # Every backslash must open one of the two escapes this
                 # renderer emits. Any other sequence is raw input that TOML
                 # will reinterpret — \t becoming a tab is how the path stops
@@ -528,9 +568,11 @@ class RenderTests(unittest.TestCase):
                         index += 1
                         continue
                     self.assertIn(
-                        body[index + 1:index + 2], ("\\", '"'),
+                        body[index + 1 : index + 2],
+                        ("\\", '"'),
                         "unescaped backslash at %d: TOML will reinterpret "
-                        "%r" % (index, body[index:index + 8]))
+                        "%r" % (index, body[index : index + 8]),
+                    )
                     index += 2
 
     def test_generated_toml_round_trips_a_hostile_plugin_root(self):
@@ -540,12 +582,13 @@ class RenderTests(unittest.TestCase):
         role_file, role = render_agents.load_roles()[0]
         for bad in ('/tmp/a"""root', "/tmp/a\\troot", '/tmp/pl"ain'):
             with self.subTest(plugin_root=bad):
-                text = render_agents.render_toml(
-                    role, dict(host, root_placeholder=bad), role_file)
+                text = render_agents.render_toml(role, dict(host, root_placeholder=bad), role_file)
                 parsed = tomllib.loads(text)
-                self.assertIn(bad, parsed["developer_instructions"],
-                              "the path must survive TOML unescaping intact")
-
+                self.assertIn(
+                    bad,
+                    parsed["developer_instructions"],
+                    "the path must survive TOML unescaping intact",
+                )
 
     # --- host-enforced prohibitions (the ledger's section 7, findings 1-3) ---
 
@@ -600,10 +643,8 @@ class RenderTests(unittest.TestCase):
 
         granted = json.loads(json.dumps(role))
         granted["tools"]["allow"] = list(granted["tools"]["allow"]) + ["delegate"]
-        granted["tools"]["deny"] = [d for d in granted["tools"]["deny"]
-                                    if d != "delegate"]
-        self.assertNotIn("spawn-agents",
-                         render_agents.enforced_prohibitions(granted, host))
+        granted["tools"]["deny"] = [d for d in granted["tools"]["deny"] if d != "delegate"]
+        self.assertNotIn("spawn-agents", render_agents.enforced_prohibitions(granted, host))
 
     def test_a_host_without_an_enforced_allowlist_claims_nothing(self):
         """Codex and Cursor must not inherit Claude's enforcement claims."""
@@ -611,8 +652,7 @@ class RenderTests(unittest.TestCase):
             host = render_agents.load_host(name)
             for _role_file, role in render_agents.load_roles():
                 with self.subTest(host=name, role=role["id"]):
-                    self.assertEqual(
-                        render_agents.enforced_prohibitions(role, host), {})
+                    self.assertEqual(render_agents.enforced_prohibitions(role, host), {})
 
     def test_enforced_prohibitions_are_not_listed_as_unenforced(self):
         """The two lists must never merge.
@@ -625,7 +665,8 @@ class RenderTests(unittest.TestCase):
         for role_file, role in render_agents.load_roles():
             with self.subTest(role=role["id"]):
                 notes = render_agents.disclosures(
-                    role, host, render_agents.resolve_tools(role, host)[2])
+                    role, host, render_agents.resolve_tools(role, host)[2]
+                )
                 joined = " ".join(notes)
                 # Not a blanket search for "host-enforced": the write-scope
                 # note legitimately uses the phrase negatively ("never
@@ -636,8 +677,7 @@ class RenderTests(unittest.TestCase):
 
                 text = render_agents.render_markdown_yaml(role, host, role_file)
                 body = text.split("## Enforcement", 1)[1]
-                negative, _, positive = body.partition(
-                    "What this host **does** enforce")
+                negative, _, positive = body.partition("What this host **does** enforce")
                 # Assert over what the renderer DERIVES rather than a fixed
                 # pair of names. spawn-agents is enforced only for a role that
                 # holds no delegation, so hardcoding it made this test fail the
@@ -645,8 +685,9 @@ class RenderTests(unittest.TestCase):
                 # wrong to "fix" that by asserting it of the orchestrator too.
                 enforced = render_agents.enforced_prohibitions(role, host)
                 if "ask-owner" in role["must_not"]:
-                    self.assertIn("ask-owner", enforced,
-                                  "a role declaring it should have it enforced")
+                    self.assertIn(
+                        "ask-owner", enforced, "a role declaring it should have it enforced"
+                    )
                 for name in enforced:
                     self.assertIn(name, positive)
                     self.assertNotIn(name, negative)
@@ -660,11 +701,11 @@ class RenderTests(unittest.TestCase):
                 # Derived per role rather than a fixed pair: spawn-agents is
                 # enforced only where the role holds no delegation, so the
                 # orchestrator legitimately lacks it.
-                role = next(r for _, r in render_agents.load_roles()
-                            if r["id"] == path.stem)
+                role = next(r for _, r in render_agents.load_roles() if r["id"] == path.stem)
                 host = render_agents.load_host("claude-code")
                 for name in render_agents.enforced_prohibitions(role, host):
                     self.assertIn("**%s**" % name, text)
+
 
 class AdapterBuildTests(unittest.TestCase):
     """ADR 0001 step 2: the bundle gate, which had to exist before step 3.
@@ -679,15 +720,20 @@ class AdapterBuildTests(unittest.TestCase):
         self.scratch = Path(self.tmp.name)
 
     def build(self, host="claude-code", out=None):
-        return run(SCRIPTS / "build_adapter.py",
-                   ["--host", host, "--out", str(out or self.scratch / "bundle")])
+        return run(
+            SCRIPTS / "build_adapter.py",
+            ["--host", host, "--out", str(out or self.scratch / "bundle")],
+        )
 
     def test_layout_matches_its_own_directory_and_schema(self):
         for path in sorted((ROOT / "adapters").glob("*/layout.json")):
             with self.subTest(adapter=path.parent.name):
                 layout = json.loads(path.read_text(encoding="utf-8"))
-                self.assertEqual(layout["host"], path.parent.name,
-                                 "a layout must not describe a host it is not filed under")
+                self.assertEqual(
+                    layout["host"],
+                    path.parent.name,
+                    "a layout must not describe a host it is not filed under",
+                )
                 validator = Validator(ROOT / "schemas/adapter-layout.schema.json")
                 self.assertEqual(validator.validate(layout), [])
 
@@ -696,19 +742,20 @@ class AdapterBuildTests(unittest.TestCase):
         result = self.build(out=out)
         self.assertEqual(result.returncode, 0, result.stderr)
         # The pieces an install actually needs.
-        for required in (".claude-plugin/plugin.json",
-                         ".claude-plugin/marketplace.json",
-                         "SKILL.md",
-                         "hooks/hooks.json",
-                         "agents/impl-executor.md"):
+        for required in (
+            ".claude-plugin/plugin.json",
+            ".claude-plugin/marketplace.json",
+            "SKILL.md",
+            "hooks/hooks.json",
+            "agents/impl-executor.md",
+        ):
             self.assertTrue((out / required).exists(), "missing %s" % required)
 
     def test_build_carries_no_bytecode(self):
         """__pycache__ in a shipped bundle is stale code waiting to be run."""
         out = self.scratch / "bundle"
         self.build(out=out)
-        strays = [p for p in out.rglob("*")
-                  if "__pycache__" in p.parts or p.suffix == ".pyc"]
+        strays = [p for p in out.rglob("*") if "__pycache__" in p.parts or p.suffix == ".pyc"]
         self.assertEqual(strays, [])
 
     def test_committed_bundle_matches_a_fresh_build(self):
@@ -720,15 +767,51 @@ class AdapterBuildTests(unittest.TestCase):
         the layouts rather than listed, so a third host is covered the day its
         layout lands instead of the day somebody remembers this file.
         """
-        built = sorted(p.parent.name for p in
-                       (ROOT / "adapters").glob("*/layout.json"))
+        built = sorted(p.parent.name for p in (ROOT / "adapters").glob("*/layout.json"))
         self.assertIn("codex", built, "fixture broken: no codex layout")
+        self.assertIn("gemini", built, "fixture broken: no gemini layout")
         for host in built:
             with self.subTest(host=host):
                 result = run(SCRIPTS / "build_adapter.py", ["--host", host, "--check"])
-                self.assertEqual(result.returncode, 0,
-                                 result.stdout + result.stderr)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("in sync", result.stdout)
+
+    def test_gemini_adapter_produces_expected_bundle_structure_and_roles(self):
+        """The Gemini adapter compiles all five canonical roles into Markdown agents
+        and projects them into a valid distribution bundle."""
+        agents_dir = ROOT / "adapters/gemini/agents"
+        for role in (
+            "root-architect",
+            "orchestrator",
+            "impl-executor",
+            "spec-validator",
+            "quality-validator",
+        ):
+            self.assertTrue(
+                (agents_dir / ("%s.md" % role)).is_file(), "missing generated agent: %s.md" % role
+            )
+
+        bundle = ROOT / "dist/gemini"
+        self.assertTrue((bundle / "plugin.json").is_file())
+        self.assertTrue((bundle / ".gemini-plugin/plugin.json").is_file())
+        self.assertTrue((bundle / "skills/root-architect-execution/SKILL.md").is_file())
+        self.assertTrue((bundle / "agents/root-architect.md").is_file())
+        self.assertTrue((bundle / "agents/orchestrator.md").is_file())
+        self.assertIn(
+            "mainAgent: true", (bundle / "agents/root-architect.md").read_text(encoding="utf-8")
+        )
+        self.assertIn(
+            "subagent: true", (bundle / "agents/impl-executor.md").read_text(encoding="utf-8")
+        )
+
+        res_iface = run(SCRIPTS / "validate_interfaces.py", ["--adapter", "gemini"])
+        self.assertEqual(res_iface.returncode, 0, res_iface.stderr)
+
+        res_render = run(SCRIPTS / "render_agents.py", ["--host", "gemini", "--check"])
+        self.assertEqual(res_render.returncode, 0, res_render.stderr)
+
+        res_build = run(SCRIPTS / "build_adapter.py", ["--host", "gemini", "--check"])
+        self.assertEqual(res_build.returncode, 0, res_build.stderr)
 
     def test_check_catches_a_source_change_that_was_never_rebuilt(self):
         """The case a path -> hash manifest cannot catch.
@@ -741,10 +824,10 @@ class AdapterBuildTests(unittest.TestCase):
         out = self.scratch / "bundle"
         self.build(out=out)
         source = out / "scripts/check_return.py"
-        source.write_text(source.read_text(encoding="utf-8") + "\n# drift\n",
-                          encoding="utf-8")
+        source.write_text(source.read_text(encoding="utf-8") + "\n# drift\n", encoding="utf-8")
         missing, extra, differing = build_adapter.compare(
-            build_adapter.ROOT / "dist/claude-code", out)
+            build_adapter.ROOT / "dist/claude-code", out
+        )
         self.assertIn(Path("scripts/check_return.py"), differing)
 
     def test_check_separates_missing_from_extra_from_differing(self):
@@ -765,10 +848,16 @@ class AdapterBuildTests(unittest.TestCase):
         """A bundle silently short a file is an install that breaks later."""
         adapter = self.scratch / "adapters" / "ghost"
         adapter.mkdir(parents=True)
-        (adapter / "layout.json").write_text(json.dumps({
-            "host": "ghost", "bundle_root": ".",
-            "place": {"does-not-exist.md": "does-not-exist.md"},
-        }), encoding="utf-8")
+        (adapter / "layout.json").write_text(
+            json.dumps(
+                {
+                    "host": "ghost",
+                    "bundle_root": ".",
+                    "place": {"does-not-exist.md": "does-not-exist.md"},
+                }
+            ),
+            encoding="utf-8",
+        )
         with mock_adapters(adapter.parent):
             with self.assertRaises(build_adapter.BuildError) as caught:
                 build_adapter.build("ghost", self.scratch / "out")
@@ -777,10 +866,16 @@ class AdapterBuildTests(unittest.TestCase):
     def test_a_layout_whose_host_disagrees_is_refused(self):
         adapter = self.scratch / "adapters" / "ghost"
         adapter.mkdir(parents=True)
-        (adapter / "layout.json").write_text(json.dumps({
-            "host": "somewhere-else", "bundle_root": ".",
-            "place": {"SKILL.md": "SKILL.md"},
-        }), encoding="utf-8")
+        (adapter / "layout.json").write_text(
+            json.dumps(
+                {
+                    "host": "somewhere-else",
+                    "bundle_root": ".",
+                    "place": {"SKILL.md": "SKILL.md"},
+                }
+            ),
+            encoding="utf-8",
+        )
         with mock_adapters(adapter.parent):
             with self.assertRaises(build_adapter.BuildError) as caught:
                 build_adapter.load_layout("ghost")
@@ -806,8 +901,9 @@ class AdapterBuildTests(unittest.TestCase):
         want = smoke_install.expectations("claude-code")
         roles = sorted(p.stem for p in (ROOT / "roles").glob("*.json"))
         self.assertEqual(want["agents"], roles)
-        self.assertEqual(want["hooks"], ["PreToolUse"],
-                         "read from hooks.json's events, not its top-level key")
+        self.assertEqual(
+            want["hooks"], ["PreToolUse"], "read from hooks.json's events, not its top-level key"
+        )
 
     def test_hook_events_come_from_the_events_not_the_wrapper(self):
         """hooks.json nests events under a "hooks" key.
@@ -816,8 +912,7 @@ class AdapterBuildTests(unittest.TestCase):
         matched the host report's own "Hooks (1)" heading -- an assertion that
         passed whatever shipped.
         """
-        self.assertNotIn("hooks",
-                         smoke_install.expectations("claude-code")["hooks"])
+        self.assertNotIn("hooks", smoke_install.expectations("claude-code")["hooks"])
 
     def test_missing_hook_targets_are_reported_not_raised(self):
         """Registration is not reachability.
@@ -830,8 +925,7 @@ class AdapterBuildTests(unittest.TestCase):
         bundle = Path(self.tmp.name) / "b2"
         shutil.copytree(ROOT / "dist/claude-code", bundle)
         (bundle / "hooks/worker_git_guard.py").unlink()
-        self.assertEqual(smoke_install.hook_targets(bundle),
-                         ["hooks/worker_git_guard.py"])
+        self.assertEqual(smoke_install.hook_targets(bundle), ["hooks/worker_git_guard.py"])
 
     def test_a_bundle_with_no_hooks_manifest_fails_cleanly(self):
         """An absent hooks.json must diagnose, never traceback.
@@ -853,14 +947,16 @@ class AdapterBuildTests(unittest.TestCase):
         description satisfy a check for a registered PreToolUse hook, so a
         bundle shipping none passed.
         """
-        report = ("thermos 1.0.0\n"
-                  "  Description: Two PreToolUse hooks enforce the boundary.\n"
-                  "\n"
-                  "Component inventory\n"
-                  "  Skills (1)  a-skill\n"
-                  "  Hooks (0)\n"
-                  "\n"
-                  "Projected token cost\n")
+        report = (
+            "thermos 1.0.0\n"
+            "  Description: Two PreToolUse hooks enforce the boundary.\n"
+            "\n"
+            "Component inventory\n"
+            "  Skills (1)  a-skill\n"
+            "  Hooks (0)\n"
+            "\n"
+            "Projected token cost\n"
+        )
         inventory = smoke_install.component_inventory(report)
         self.assertIn("Hooks (0)", inventory)
         self.assertNotIn("Description", inventory)
@@ -869,16 +965,14 @@ class AdapterBuildTests(unittest.TestCase):
         with self.assertRaises(smoke_install.SmokeError):
             smoke_install.component_inventory("no inventory here")
 
-class CheckReturnTests(unittest.TestCase):
 
+class CheckReturnTests(unittest.TestCase):
     def check(self, role, payload, extra=None, raw=None):
-        body = raw if raw is not None else \
-            "here you go\n\n```json\n%s\n```\n" % json.dumps(payload)
+        body = raw if raw is not None else "here you go\n\n```json\n%s\n```\n" % json.dumps(payload)
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
             fh.write(body)
             path = fh.name
-        return run(SCRIPTS / "check_return.py",
-                   ["--role", role, "--file", path] + (extra or []))
+        return run(SCRIPTS / "check_return.py", ["--role", role, "--file", path] + (extra or []))
 
     def test_accepts_a_well_formed_report(self):
         self.assertEqual(self.check("implementer", valid_report()).returncode, 0)
@@ -891,9 +985,9 @@ class CheckReturnTests(unittest.TestCase):
         self.assertIn("must carry observed RED counts", result.stderr)
 
     def test_pass_carrying_findings_is_rejected(self):
-        verdict = valid_verdict(findings=[{
-            "path": "a.py", "requirement": "r", "evidence": "e",
-            "required_fix": "f"}])
+        verdict = valid_verdict(
+            findings=[{"path": "a.py", "requirement": "r", "evidence": "e", "required_fix": "f"}]
+        )
         result = self.check("spec-validator", verdict)
         self.assertEqual(result.returncode, 1)
         self.assertIn("PASS cannot carry findings", result.stderr)
@@ -904,16 +998,17 @@ class CheckReturnTests(unittest.TestCase):
         self.assertIn("must carry at least one finding", result.stderr)
 
     def test_spec_validator_that_ran_commands_is_rejected(self):
-        verdict = valid_verdict(commands_rerun=[
-            {"command": "pytest", "observed": "19 passed"}])
+        verdict = valid_verdict(commands_rerun=[{"command": "pytest", "observed": "19 passed"}])
         result = self.check("spec-validator", verdict)
         self.assertEqual(result.returncode, 1)
         self.assertIn("review roles were combined", result.stderr)
 
     def test_quality_finding_without_a_failure_scenario_is_rejected(self):
-        verdict = valid_verdict(role="quality-validator", status="FINDINGS",
-                                findings=[{"path": "a.py", "requirement": "r",
-                                           "evidence": "e", "required_fix": "f"}])
+        verdict = valid_verdict(
+            role="quality-validator",
+            status="FINDINGS",
+            findings=[{"path": "a.py", "requirement": "r", "evidence": "e", "required_fix": "f"}],
+        )
         result = self.check("quality-validator", verdict)
         self.assertEqual(result.returncode, 1)
         self.assertIn("failure_scenario", result.stderr)
@@ -924,14 +1019,12 @@ class CheckReturnTests(unittest.TestCase):
         self.assertIn("root dispatched", result.stderr)
 
     def test_task_mismatch_is_rejected(self):
-        result = self.check("implementer", valid_report(),
-                            extra=["--task", "a different task"])
+        result = self.check("implementer", valid_report(), extra=["--task", "a different task"])
         self.assertEqual(result.returncode, 1)
         self.assertIn("root dispatched", result.stderr)
 
     def test_prose_without_a_json_block_is_rejected(self):
-        result = self.check("implementer", None,
-                            raw="I finished the task and all tests pass.")
+        result = self.check("implementer", None, raw="I finished the task and all tests pass.")
         self.assertEqual(result.returncode, 1)
         self.assertIn("no fenced json block", result.stderr)
 
@@ -943,7 +1036,6 @@ class CheckReturnTests(unittest.TestCase):
 
 
 class DispatchStateTests(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.workspace = Path(self.tmp.name)
@@ -955,10 +1047,18 @@ class DispatchStateTests(unittest.TestCase):
         return str(path)
 
     def open_dispatch(self, brief=None, run_id="20260907-task-3"):
-        return run(SCRIPTS / "dispatch_state.py", [
-            "open", "--workspace", str(self.workspace),
-            "--brief", self.write_brief(brief or valid_brief()),
-            "--run-id", run_id])
+        return run(
+            SCRIPTS / "dispatch_state.py",
+            [
+                "open",
+                "--workspace",
+                str(self.workspace),
+                "--brief",
+                self.write_brief(brief or valid_brief()),
+                "--run-id",
+                run_id,
+            ],
+        )
 
     def test_opens_and_reports_protected_paths(self):
         result = self.open_dispatch()
@@ -978,8 +1078,9 @@ class DispatchStateTests(unittest.TestCase):
         self.assertIn("escalation_reason", result.stderr)
 
     def test_accepts_escalation_with_a_recorded_reason(self):
-        result = self.open_dispatch(valid_brief(
-            attempt=2, escalation_reason="attempt 1 left the tamper case unwritten"))
+        result = self.open_dispatch(
+            valid_brief(attempt=2, escalation_reason="attempt 1 left the tamper case unwritten")
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_refuses_a_second_concurrent_dispatch(self):
@@ -990,35 +1091,53 @@ class DispatchStateTests(unittest.TestCase):
 
     def test_close_frees_the_slot(self):
         self.open_dispatch()
-        closed = run(SCRIPTS / "dispatch_state.py", [
-            "close", "--workspace", str(self.workspace),
-            "--run-id", "20260907-task-3", "--outcome", "accepted"])
+        closed = run(
+            SCRIPTS / "dispatch_state.py",
+            [
+                "close",
+                "--workspace",
+                str(self.workspace),
+                "--run-id",
+                "20260907-task-3",
+                "--outcome",
+                "accepted",
+            ],
+        )
         self.assertEqual(closed.returncode, 0, closed.stderr)
         self.assertEqual(self.open_dispatch(run_id="20260907-task-4").returncode, 0)
 
     def test_blocked_outcome_marks_the_dispatch_aborted(self):
         self.open_dispatch()
-        run(SCRIPTS / "dispatch_state.py", [
-            "close", "--workspace", str(self.workspace),
-            "--run-id", "20260907-task-3", "--outcome", "blocked"])
-        state = json.loads((self.workspace / ".root-architect" / "state"
-                            / "dispatch-20260907-task-3.json").read_text())
+        run(
+            SCRIPTS / "dispatch_state.py",
+            [
+                "close",
+                "--workspace",
+                str(self.workspace),
+                "--run-id",
+                "20260907-task-3",
+                "--outcome",
+                "blocked",
+            ],
+        )
+        state = json.loads(
+            (
+                self.workspace / ".root-architect" / "state" / "dispatch-20260907-task-3.json"
+            ).read_text()
+        )
         self.assertEqual(state["status"], "aborted")
 
     def test_active_reports_nothing_when_idle(self):
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["active", "--workspace", str(self.workspace)])
+        result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
         self.assertIn("no open dispatch", result.stdout)
 
     def test_verify_exits_0_when_idle(self):
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["verify", "--workspace", str(self.workspace)])
+        result = run(SCRIPTS / "dispatch_state.py", ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 0)
 
     def test_verify_exits_0_and_lists_a_healthy_dispatch(self):
         self.open_dispatch()
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["verify", "--workspace", str(self.workspace)])
+        result = run(SCRIPTS / "dispatch_state.py", ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ok open 20260907-task-3", result.stdout)
 
@@ -1026,8 +1145,7 @@ class DispatchStateTests(unittest.TestCase):
         state_dir = self.workspace / ".root-architect" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
         (state_dir / "dispatch-bad.json").write_text("not json", encoding="utf-8")
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["verify", "--workspace", str(self.workspace)])
+        result = run(SCRIPTS / "dispatch_state.py", ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertIn("CORRUPT", result.stdout)
         self.assertIn("not valid JSON", result.stdout)
@@ -1036,9 +1154,9 @@ class DispatchStateTests(unittest.TestCase):
         state_dir = self.workspace / ".root-architect" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
         (state_dir / "dispatch-bad.json").write_text(
-            json.dumps({"schema_version": 1, "run_id": "bad"}), encoding="utf-8")
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["verify", "--workspace", str(self.workspace)])
+            json.dumps({"schema_version": 1, "run_id": "bad"}), encoding="utf-8"
+        )
+        result = run(SCRIPTS / "dispatch_state.py", ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertIn("CORRUPT", result.stdout)
 
@@ -1055,8 +1173,7 @@ class DispatchStateTests(unittest.TestCase):
         state_dir = self.workspace / ".root-architect" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
         (state_dir / "dispatch-old.json").write_text("bad json", encoding="utf-8")
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["active", "--workspace", str(self.workspace)])
+        result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertIn("state file corrupted", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
@@ -1065,9 +1182,18 @@ class DispatchStateTests(unittest.TestCase):
         state_dir = self.workspace / ".root-architect" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
         (state_dir / "dispatch-task-3.json").write_text("bad json", encoding="utf-8")
-        result = run(SCRIPTS / "dispatch_state.py", [
-            "close", "--workspace", str(self.workspace),
-            "--run-id", "task-3", "--outcome", "accepted"])
+        result = run(
+            SCRIPTS / "dispatch_state.py",
+            [
+                "close",
+                "--workspace",
+                str(self.workspace),
+                "--run-id",
+                "task-3",
+                "--outcome",
+                "accepted",
+            ],
+        )
         self.assertEqual(result.returncode, 1)
         self.assertIn("cannot read state file", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
@@ -1078,12 +1204,12 @@ class DispatchStateTests(unittest.TestCase):
         state_dir.mkdir(parents=True, exist_ok=True)
         # Write a corrupt closed record that sorts before the open one
         (state_dir / "dispatch-20260901-old.json").write_text(
-            json.dumps({"schema_version": 1, "run_id": "20260901-old",
-                       "status": "closed"}), encoding="utf-8")
+            json.dumps({"schema_version": 1, "run_id": "20260901-old", "status": "closed"}),
+            encoding="utf-8",
+        )
         # Write a healthy open record
         self.open_dispatch(run_id="20260907-task-3")
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["active", "--workspace", str(self.workspace)])
+        result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("20260907-task-3", result.stdout)
 
@@ -1094,10 +1220,8 @@ class DispatchStateTests(unittest.TestCase):
         # Write a healthy open record first
         self.open_dispatch(run_id="20260907-task-3")
         # Write an unparseable record that sorts after
-        (state_dir / "dispatch-20260908-bad.json").write_text(
-            "corrupted data", encoding="utf-8")
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["active", "--workspace", str(self.workspace)])
+        (state_dir / "dispatch-20260908-bad.json").write_text("corrupted data", encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
         # Should fail because the unparseable record could be the open dispatch
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("state file corrupted", result.stderr)
@@ -1113,8 +1237,9 @@ class DispatchStateTests(unittest.TestCase):
         backup = dispatch_schema.read_text(encoding="utf-8")
         try:
             dispatch_schema.unlink()
-            result = run(SCRIPTS / "dispatch_state.py",
-                         ["active", "--workspace", str(self.workspace)])
+            result = run(
+                SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)]
+            )
             self.assertEqual(result.returncode, 1)
             self.assertIn("schema", result.stderr.lower())
             self.assertNotIn("FileNotFoundError", result.stderr)
@@ -1129,18 +1254,15 @@ class DispatchStateTests(unittest.TestCase):
         # Write a healthy dispatch
         self.open_dispatch(run_id="20260907-task-1")
         # Write a corrupt dispatch
-        (state_dir / "dispatch-20260907-bad.json").write_text(
-            "not json", encoding="utf-8")
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["verify", "--workspace", str(self.workspace)])
+        (state_dir / "dispatch-20260907-bad.json").write_text("not json", encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py", ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertIn("ok open 20260907-task-1", result.stdout)
         self.assertIn("CORRUPT", result.stdout)
 
     def test_active_fails_cleanly_when_schema_file_is_invalid_json(self):
         """A schema file that exists but is not valid JSON must not traceback."""
-        copy_root = make_corrupted_copy(
-            self.tmp.name, "dispatch.schema.json", "not json at all")
+        copy_root = make_corrupted_copy(self.tmp.name, "dispatch.schema.json", "not json at all")
         script = copy_root / "scripts" / "dispatch_state.py"
         self.open_dispatch()
         result = run(script, ["active", "--workspace", str(self.workspace)])
@@ -1151,8 +1273,7 @@ class DispatchStateTests(unittest.TestCase):
 
     def test_verify_reports_corrupt_when_schema_file_is_invalid_json(self):
         """verify must still exit 1 and report CORRUPT, not traceback."""
-        copy_root = make_corrupted_copy(
-            self.tmp.name, "brief.schema.json", "{ this is not json")
+        copy_root = make_corrupted_copy(self.tmp.name, "brief.schema.json", "{ this is not json")
         script = copy_root / "scripts" / "dispatch_state.py"
         self.open_dispatch()
         result = run(script, ["verify", "--workspace", str(self.workspace)])
@@ -1166,8 +1287,7 @@ class DispatchStateTests(unittest.TestCase):
         This is the regression test for the trap: the naive fix blames the
         root schema because that is what _validate_dispatch was called with.
         """
-        copy_root = make_corrupted_copy(
-            self.tmp.name, "brief.schema.json", "{ not json")
+        copy_root = make_corrupted_copy(self.tmp.name, "brief.schema.json", "{ not json")
         script = copy_root / "scripts" / "dispatch_state.py"
         self.open_dispatch()
         result = run(script, ["active", "--workspace", str(self.workspace)])
@@ -1178,8 +1298,7 @@ class DispatchStateTests(unittest.TestCase):
 
     def test_active_names_missing_sibling_schema(self):
         """A missing sibling schema file must be named in the error."""
-        copy_root = make_corrupted_copy(
-            self.tmp.name, "brief.schema.json", None)
+        copy_root = make_corrupted_copy(self.tmp.name, "brief.schema.json", None)
         script = copy_root / "scripts" / "dispatch_state.py"
         self.open_dispatch()
         result = run(script, ["active", "--workspace", str(self.workspace)])
@@ -1189,8 +1308,7 @@ class DispatchStateTests(unittest.TestCase):
 
     def test_verify_reports_corrupt_when_sibling_schema_is_invalid_json(self):
         """verify must still report CORRUPT and exit 1 for a corrupt sibling."""
-        copy_root = make_corrupted_copy(
-            self.tmp.name, "brief.schema.json", "{ not json")
+        copy_root = make_corrupted_copy(self.tmp.name, "brief.schema.json", "{ not json")
         script = copy_root / "scripts" / "dispatch_state.py"
         self.open_dispatch()
         result = run(script, ["verify", "--workspace", str(self.workspace)])
@@ -1202,10 +1320,8 @@ class DispatchStateTests(unittest.TestCase):
         """A dispatch file whose top level is a list must not AttributeError."""
         state_dir = self.workspace / ".root-architect" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
-        (state_dir / "dispatch-list.json").write_text(
-            json.dumps([1, 2, 3]), encoding="utf-8")
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["active", "--workspace", str(self.workspace)])
+        (state_dir / "dispatch-list.json").write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+        result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
         self.assertIn("state file corrupted", result.stderr)
@@ -1215,12 +1331,10 @@ class DispatchStateTests(unittest.TestCase):
         state_dir = self.workspace / ".root-architect" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
         (state_dir / "dispatch-null.json").write_text("null", encoding="utf-8")
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["active", "--workspace", str(self.workspace)])
+        result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
         self.assertIn("state file corrupted", result.stderr)
-
 
     def _make_unlistable(self, directory):
         """chmod 000 a state directory, restoring the mode whatever happens.
@@ -1242,6 +1356,7 @@ class DispatchStateTests(unittest.TestCase):
         nothing, which would read exactly like an empty directory.
         """
         from dispatch_state import active_dispatch
+
         directory = self.workspace / ".root-architect" / "state"
         self._make_unlistable(directory)
         with self.assertRaises(DispatchStateError) as caught:
@@ -1251,8 +1366,7 @@ class DispatchStateTests(unittest.TestCase):
     def test_active_command_fails_cleanly_on_an_unlistable_directory(self):
         directory = self.workspace / ".root-architect" / "state"
         self._make_unlistable(directory)
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["active", "--workspace", str(self.workspace)])
+        result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
         self.assertNotIn("no open dispatch", result.stdout)
@@ -1261,8 +1375,7 @@ class DispatchStateTests(unittest.TestCase):
     def test_verify_reports_an_unlistable_directory(self):
         directory = self.workspace / ".root-architect" / "state"
         self._make_unlistable(directory)
-        result = run(SCRIPTS / "dispatch_state.py",
-                     ["verify", "--workspace", str(self.workspace)])
+        result = run(SCRIPTS / "dispatch_state.py", ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
         self.assertNotIn("no dispatch files", result.stdout)
@@ -1280,14 +1393,22 @@ class RootWriteGuardTests(unittest.TestCase):
     def open_dispatch(self, brief=None):
         path = self.workspace / "brief.json"
         path.write_text(json.dumps(brief or valid_brief()), encoding="utf-8")
-        result = run(SCRIPTS / "dispatch_state.py", [
-            "open", "--workspace", str(self.workspace), "--brief", str(path),
-            "--run-id", "20260907-task-3"])
+        result = run(
+            SCRIPTS / "dispatch_state.py",
+            [
+                "open",
+                "--workspace",
+                str(self.workspace),
+                "--brief",
+                str(path),
+                "--run-id",
+                "20260907-task-3",
+            ],
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def call(self, tool="Edit", path="scripts/envelope.py", agent_type=None):
-        payload = {"tool_name": tool, "cwd": str(self.workspace),
-                   "tool_input": {"file_path": path}}
+        payload = {"tool_name": tool, "cwd": str(self.workspace), "tool_input": {"file_path": path}}
         if agent_type:
             payload["agent_type"] = agent_type
         return run(HOOKS / "root_write_guard.py", [], stdin=json.dumps(payload))
@@ -1304,10 +1425,15 @@ class RootWriteGuardTests(unittest.TestCase):
 
     def test_codex_apply_patch_identity_unknown_is_not_blocked(self):
         self.open_dispatch()
-        payload = {"tool_name": "apply_patch", "cwd": str(self.workspace),
-                   "tool_input": {"command": "*** Begin Patch\n"
-                                   "*** Update File: scripts/envelope.py\n"
-                                   "@@\n*** End Patch\n"}}
+        payload = {
+            "tool_name": "apply_patch",
+            "cwd": str(self.workspace),
+            "tool_input": {
+                "command": "*** Begin Patch\n"
+                "*** Update File: scripts/envelope.py\n"
+                "@@\n*** End Patch\n"
+            },
+        }
         result = self.raw_call(payload)
         self.assertEqual(result.returncode, 0)
 
@@ -1335,16 +1461,18 @@ class RootWriteGuardTests(unittest.TestCase):
 
     def test_survives_list_tool_input_without_blocking(self):
         self.open_dispatch()
-        payload = {"tool_name": "Edit", "cwd": str(self.workspace),
-                   "tool_input": ["not", "a", "dict"]}
+        payload = {
+            "tool_name": "Edit",
+            "cwd": str(self.workspace),
+            "tool_input": ["not", "a", "dict"],
+        }
         result = run(HOOKS / "root_write_guard.py", [], stdin=json.dumps(payload))
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("Traceback", result.stderr)
 
     def test_survives_string_tool_input_without_blocking(self):
         self.open_dispatch()
-        payload = {"tool_name": "Edit", "cwd": str(self.workspace),
-                   "tool_input": "not a dict"}
+        payload = {"tool_name": "Edit", "cwd": str(self.workspace), "tool_input": "not a dict"}
         result = run(HOOKS / "root_write_guard.py", [], stdin=json.dumps(payload))
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("Traceback", result.stderr)
@@ -1355,34 +1483,45 @@ class RootWriteGuardTests(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
 
     def raw_call(self, payload):
-        return run(HOOKS / "root_write_guard.py", [],
-                   stdin=json.dumps(payload))
+        return run(HOOKS / "root_write_guard.py", [], stdin=json.dumps(payload))
 
     def test_survives_non_string_cwd_without_blocking(self):
         self.open_dispatch()
-        result = self.raw_call({"tool_name": "Edit", "cwd": 42,
-                                "tool_input": {"file_path": "scripts/envelope.py"}})
+        result = self.raw_call(
+            {"tool_name": "Edit", "cwd": 42, "tool_input": {"file_path": "scripts/envelope.py"}}
+        )
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("Traceback", result.stderr)
 
     def test_survives_non_string_path_value_without_blocking(self):
         self.open_dispatch()
-        result = self.raw_call({"tool_name": "Edit", "cwd": str(self.workspace),
-                                "tool_input": {"file_path": 42}})
+        result = self.raw_call(
+            {"tool_name": "Edit", "cwd": str(self.workspace), "tool_input": {"file_path": 42}}
+        )
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("Traceback", result.stderr)
 
     def test_survives_a_path_with_an_embedded_null_byte(self):
         self.open_dispatch()
-        result = self.raw_call({"tool_name": "Edit", "cwd": str(self.workspace),
-                                "tool_input": {"file_path": "scripts/env\x00.py"}})
+        result = self.raw_call(
+            {
+                "tool_name": "Edit",
+                "cwd": str(self.workspace),
+                "tool_input": {"file_path": "scripts/env\x00.py"},
+            }
+        )
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("Traceback", result.stderr)
 
     def test_survives_an_unhashable_tool_name(self):
         self.open_dispatch()
-        result = self.raw_call({"tool_name": ["Edit"], "cwd": str(self.workspace),
-                                "tool_input": {"file_path": "scripts/envelope.py"}})
+        result = self.raw_call(
+            {
+                "tool_name": ["Edit"],
+                "cwd": str(self.workspace),
+                "tool_input": {"file_path": "scripts/envelope.py"},
+            }
+        )
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("Traceback", result.stderr)
 
@@ -1392,16 +1531,22 @@ class RootWriteGuardTests(unittest.TestCase):
         shapes = [42, 4.5, True, None, [], {}, "", "a\x00b", ["x"], {"k": "v"}]
         for shape in shapes:
             for key in ("tool_name", "cwd", "agent_type", "tool_input"):
-                payload = {"tool_name": "Edit", "cwd": str(self.workspace),
-                           "tool_input": {"file_path": "scripts/envelope.py"}}
+                payload = {
+                    "tool_name": "Edit",
+                    "cwd": str(self.workspace),
+                    "tool_input": {"file_path": "scripts/envelope.py"},
+                }
                 payload[key] = shape
                 with self.subTest(key=key, shape=shape):
                     result = self.raw_call(payload)
                     self.assertIn(result.returncode, (0, 2))
                     self.assertNotIn("Traceback", result.stderr)
             for key in ("file_path", "notebook_path", "path"):
-                payload = {"tool_name": "Edit", "cwd": str(self.workspace),
-                           "tool_input": {key: shape}}
+                payload = {
+                    "tool_name": "Edit",
+                    "cwd": str(self.workspace),
+                    "tool_input": {key: shape},
+                }
                 with self.subTest(key=key, shape=shape):
                     result = self.raw_call(payload)
                     self.assertIn(result.returncode, (0, 2))
@@ -1421,10 +1566,13 @@ class RootWriteGuardTests(unittest.TestCase):
 
     def test_denies_on_open_dispatch_missing_brief(self):
         directory = self.state_dir()
-        record = {"schema_version": 1, "run_id": "x", "status": "open",
-                   "opened_at": "2026-01-01T00:00:00+00:00"}
-        (directory / "dispatch-x.json").write_text(
-            json.dumps(record), encoding="utf-8")
+        record = {
+            "schema_version": 1,
+            "run_id": "x",
+            "status": "open",
+            "opened_at": "2026-01-01T00:00:00+00:00",
+        }
+        (directory / "dispatch-x.json").write_text(json.dumps(record), encoding="utf-8")
         result = self.call()
         self.assertEqual(result.returncode, 2)
         self.assertIn("verify", result.stderr)
@@ -1433,10 +1581,14 @@ class RootWriteGuardTests(unittest.TestCase):
         directory = self.state_dir()
         brief = valid_brief()
         del brief["task"]
-        record = {"schema_version": 1, "run_id": "x", "status": "open",
-                   "opened_at": "2026-01-01T00:00:00+00:00", "brief": brief}
-        (directory / "dispatch-x.json").write_text(
-            json.dumps(record), encoding="utf-8")
+        record = {
+            "schema_version": 1,
+            "run_id": "x",
+            "status": "open",
+            "opened_at": "2026-01-01T00:00:00+00:00",
+            "brief": brief,
+        }
+        (directory / "dispatch-x.json").write_text(json.dumps(record), encoding="utf-8")
         result = self.call()
         self.assertEqual(result.returncode, 2)
         self.assertIn("verify", result.stderr)
@@ -1444,10 +1596,14 @@ class RootWriteGuardTests(unittest.TestCase):
     def test_denies_on_brief_with_non_integer_attempt(self):
         directory = self.state_dir()
         brief = valid_brief(attempt="one")
-        record = {"schema_version": 1, "run_id": "x", "status": "open",
-                   "opened_at": "2026-01-01T00:00:00+00:00", "brief": brief}
-        (directory / "dispatch-x.json").write_text(
-            json.dumps(record), encoding="utf-8")
+        record = {
+            "schema_version": 1,
+            "run_id": "x",
+            "status": "open",
+            "opened_at": "2026-01-01T00:00:00+00:00",
+            "brief": brief,
+        }
+        (directory / "dispatch-x.json").write_text(json.dumps(record), encoding="utf-8")
         result = self.call()
         self.assertEqual(result.returncode, 2)
         self.assertIn("verify", result.stderr)
@@ -1462,10 +1618,12 @@ class RootWriteGuardTests(unittest.TestCase):
         self.assertIn("verify", result.stderr)
 
     def call_isolated_guard(self, copy_root):
-        payload = {"tool_name": "Edit", "cwd": str(self.workspace),
-                   "tool_input": {"file_path": "scripts/envelope.py"}}
-        return run(copy_root / "hooks" / "root_write_guard.py", [],
-                   stdin=json.dumps(payload))
+        payload = {
+            "tool_name": "Edit",
+            "cwd": str(self.workspace),
+            "tool_input": {"file_path": "scripts/envelope.py"},
+        }
+        return run(copy_root / "hooks" / "root_write_guard.py", [], stdin=json.dumps(payload))
 
     def test_denies_on_open_dispatch_with_corrupt_sibling_schema(self):
         """A corrupt sibling schema (brief.schema.json) must still deny with
@@ -1476,8 +1634,8 @@ class RootWriteGuardTests(unittest.TestCase):
         """
         self.open_dispatch()
         copy_root = make_corrupted_copy(
-            self.tmp.name, "brief.schema.json", "{ not json",
-            include_hooks=True)
+            self.tmp.name, "brief.schema.json", "{ not json", include_hooks=True
+        )
         result = self.call_isolated_guard(copy_root)
         self.assertEqual(result.returncode, 2)
         self.assertNotIn("Traceback", result.stderr)
@@ -1486,7 +1644,8 @@ class RootWriteGuardTests(unittest.TestCase):
         """A missing sibling schema must also deny with exit 2, not escape."""
         self.open_dispatch()
         copy_root = make_corrupted_copy(
-            self.tmp.name, "brief.schema.json", None, include_hooks=True)
+            self.tmp.name, "brief.schema.json", None, include_hooks=True
+        )
         result = self.call_isolated_guard(copy_root)
         self.assertEqual(result.returncode, 2)
         self.assertNotIn("Traceback", result.stderr)
@@ -1495,17 +1654,19 @@ class RootWriteGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as isolated:
             isolated = Path(isolated)
             (isolated / "hooks").mkdir()
-            shutil.copy(HOOKS / "root_write_guard.py",
-                        isolated / "hooks" / "root_write_guard.py")
+            shutil.copy(HOOKS / "root_write_guard.py", isolated / "hooks" / "root_write_guard.py")
             workspace = isolated / "workspace"
             directory = workspace / ".root-architect" / "state"
             directory.mkdir(parents=True)
             (directory / "dispatch-x.json").write_text(
-                json.dumps({"status": "open"}), encoding="utf-8")
-            payload = {"tool_name": "Edit", "cwd": str(workspace),
-                       "tool_input": {"file_path": "scripts/envelope.py"}}
-            result = run(isolated / "hooks" / "root_write_guard.py", [],
-                         stdin=json.dumps(payload))
+                json.dumps({"status": "open"}), encoding="utf-8"
+            )
+            payload = {
+                "tool_name": "Edit",
+                "cwd": str(workspace),
+                "tool_input": {"file_path": "scripts/envelope.py"},
+            }
+            result = run(isolated / "hooks" / "root_write_guard.py", [], stdin=json.dumps(payload))
             self.assertEqual(result.returncode, 2)
 
     def test_denies_when_the_state_directory_cannot_be_listed(self):
@@ -1529,22 +1690,25 @@ class RootWriteGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as isolated:
             isolated = Path(isolated)
             (isolated / "hooks").mkdir()
-            shutil.copy(HOOKS / "root_write_guard.py",
-                        isolated / "hooks" / "root_write_guard.py")
+            shutil.copy(HOOKS / "root_write_guard.py", isolated / "hooks" / "root_write_guard.py")
             workspace = isolated / "workspace"
             directory = workspace / ".root-architect" / "state"
             directory.mkdir(parents=True)
             (directory / "dispatch-x.json").write_text(
-                json.dumps({"status": "open"}), encoding="utf-8")
+                json.dumps({"status": "open"}), encoding="utf-8"
+            )
             original = directory.stat().st_mode
             os.chmod(directory, 0o000)
             try:
-                payload = {"tool_name": "Edit", "cwd": str(workspace),
-                           "tool_input": {"file_path": "scripts/envelope.py"}}
-                result = run(isolated / "hooks" / "root_write_guard.py", [],
-                             stdin=json.dumps(payload))
-                self.assertEqual(result.returncode, 2,
-                                 result.stdout + result.stderr)
+                payload = {
+                    "tool_name": "Edit",
+                    "cwd": str(workspace),
+                    "tool_input": {"file_path": "scripts/envelope.py"},
+                }
+                result = run(
+                    isolated / "hooks" / "root_write_guard.py", [], stdin=json.dumps(payload)
+                )
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertIn(str(directory), result.stderr)
             finally:
                 os.chmod(directory, original)
@@ -1560,7 +1724,10 @@ class RootWriteGuardTests(unittest.TestCase):
         """
         # Import the guard module to access _resolve_owned
         import importlib.util
-        spec = importlib.util.spec_from_file_location("root_write_guard", HOOKS / "root_write_guard.py")
+
+        spec = importlib.util.spec_from_file_location(
+            "root_write_guard", HOOKS / "root_write_guard.py"
+        )
         guard_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(guard_module)
 
@@ -1605,16 +1772,17 @@ class RootWriteGuardTests(unittest.TestCase):
             self.skipTest("symlink creation not permitted in this environment")
 
         import importlib.util
+
         spec = importlib.util.spec_from_file_location(
-            "root_write_guard", HOOKS / "root_write_guard.py")
+            "root_write_guard", HOOKS / "root_write_guard.py"
+        )
         guard_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(guard_module)
 
         (self.workspace / "scripts").mkdir()
         (self.workspace / "scripts" / "owned.py").write_text("x", encoding="utf-8")
 
-        resolved = guard_module._resolve_owned(
-            self.workspace, ["scripts/owned.py", "loop/x"])
+        resolved = guard_module._resolve_owned(self.workspace, ["scripts/owned.py", "loop/x"])
 
         # Resolution completed instead of raising, and the entry that can be
         # resolved is protected on every interpreter.
@@ -1642,8 +1810,7 @@ class RootWriteGuardTests(unittest.TestCase):
         (self.workspace / "scripts").mkdir(exist_ok=True)
         (self.workspace / "scripts" / "owned.py").write_text("x", encoding="utf-8")
 
-        self.open_dispatch(valid_brief(
-            write_paths=["scripts/owned.py", "loop/x"]))
+        self.open_dispatch(valid_brief(write_paths=["scripts/owned.py", "loop/x"]))
         result = self.call(path="scripts/owned.py")
         self.assertEqual(result.returncode, 2)
         self.assertNotIn("Traceback", result.stderr)
@@ -1687,16 +1854,16 @@ class RootWriteGuardTests(unittest.TestCase):
             "run_id": "20260907-test-schema-invalid",
             "status": "open",
             "opened_at": "2026-01-01T00:00:00+00:00",
-            "brief": brief
+            "brief": brief,
         }
         (directory / "dispatch-20260907-test-schema-invalid.json").write_text(
-            json.dumps(record), encoding="utf-8")
+            json.dumps(record), encoding="utf-8"
+        )
 
         result = self.call()
         # Should deny via schema-invalid branch, not allow
         self.assertEqual(result.returncode, 2)
         self.assertIn("cannot be trusted", result.stderr)
-
 
     # --- A denial must terminate the process even if it cannot report ---
 
@@ -1722,8 +1889,13 @@ class RootWriteGuardTests(unittest.TestCase):
         sys.exit(2)) are both fail-open, and both are failures here.
         """
         self.open_dispatch()
-        payload = json.dumps({"tool_name": "Edit", "cwd": str(self.workspace),
-                              "tool_input": {"file_path": "scripts/envelope.py"}})
+        payload = json.dumps(
+            {
+                "tool_name": "Edit",
+                "cwd": str(self.workspace),
+                "tool_input": {"file_path": "scripts/envelope.py"},
+            }
+        )
         for unbuffered in (True, False):
             with self.subTest(unbuffered=unbuffered):
                 env = dict(os.environ)
@@ -1735,8 +1907,12 @@ class RootWriteGuardTests(unittest.TestCase):
                 try:
                     result = subprocess.run(
                         [sys.executable, str(HOOKS / "root_write_guard.py")],
-                        input=payload, text=True, env=env,
-                        stdout=sink, stderr=subprocess.PIPE)
+                        input=payload,
+                        text=True,
+                        env=env,
+                        stdout=sink,
+                        stderr=subprocess.PIPE,
+                    )
                 finally:
                     sink.close()
                 self.assertEqual(result.returncode, 2)
@@ -1744,8 +1920,13 @@ class RootWriteGuardTests(unittest.TestCase):
     def test_denial_exits_2_when_stdout_is_a_closed_pipe(self):
         """Same invariant via the other real-world shape: a broken pipe."""
         self.open_dispatch()
-        payload = json.dumps({"tool_name": "Edit", "cwd": str(self.workspace),
-                              "tool_input": {"file_path": "scripts/envelope.py"}})
+        payload = json.dumps(
+            {
+                "tool_name": "Edit",
+                "cwd": str(self.workspace),
+                "tool_input": {"file_path": "scripts/envelope.py"},
+            }
+        )
         for unbuffered in (True, False):
             with self.subTest(unbuffered=unbuffered):
                 env = dict(os.environ)
@@ -1758,8 +1939,12 @@ class RootWriteGuardTests(unittest.TestCase):
                 try:
                     result = subprocess.run(
                         [sys.executable, str(HOOKS / "root_write_guard.py")],
-                        input=payload, text=True, env=env,
-                        stdout=write_fd, stderr=subprocess.PIPE)
+                        input=payload,
+                        text=True,
+                        env=env,
+                        stdout=write_fd,
+                        stderr=subprocess.PIPE,
+                    )
                 finally:
                     os.close(write_fd)
                 self.assertEqual(result.returncode, 2)
@@ -1785,8 +1970,7 @@ class RootWriteGuardTests(unittest.TestCase):
             "sys.stdout = Broken()\n"
             "m._deny('boom')\n"
         ) % str(HOOKS / "root_write_guard.py")
-        result = subprocess.run([sys.executable, "-c", program],
-                                capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
 
     def test_deny_exits_2_when_both_streams_are_broken(self):
@@ -1804,31 +1988,40 @@ class RootWriteGuardTests(unittest.TestCase):
             "sys.stderr = Broken()\n"
             "m._deny('boom')\n"
         ) % str(HOOKS / "root_write_guard.py")
-        result = subprocess.run([sys.executable, "-c", program],
-                                capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
 
     def test_allow_still_exits_0_with_an_unwritable_stdout(self):
         """The fix must not turn deliberate allows into denials."""
         self.open_dispatch()
-        payload = json.dumps({"tool_name": "Edit", "cwd": str(self.workspace),
-                              "tool_input": {"file_path": "AI_Codex/session.md"}})
+        payload = json.dumps(
+            {
+                "tool_name": "Edit",
+                "cwd": str(self.workspace),
+                "tool_input": {"file_path": "AI_Codex/session.md"},
+            }
+        )
         sink = self.unwritable_stdout()
         try:
             result = subprocess.run(
                 [sys.executable, str(HOOKS / "root_write_guard.py")],
-                input=payload, text=True,
-                stdout=sink, stderr=subprocess.PIPE)
+                input=payload,
+                text=True,
+                stdout=sink,
+                stderr=subprocess.PIPE,
+            )
         finally:
             sink.close()
         self.assertEqual(result.returncode, 0)
 
 
 class WorkerGitGuardTests(unittest.TestCase):
-
     def call(self, agent_type, command=None, tool="Bash"):
-        payload = {"tool_name": tool, "agent_type": agent_type,
-                   "tool_input": {"command": command} if command else {}}
+        payload = {
+            "tool_name": tool,
+            "agent_type": agent_type,
+            "tool_input": {"command": command} if command else {},
+        }
         return run(HOOKS / "worker_git_guard.py", [], stdin=json.dumps(payload))
 
     def test_ignores_the_root_session(self):
@@ -1838,24 +2031,21 @@ class WorkerGitGuardTests(unittest.TestCase):
 
     def test_recognises_a_namespaced_agent_type(self):
         """Claude Code reports a plugin agent as "<plugin>:<agent>"."""
-        result = self.call("root-architect-execution:impl-executor",
-                           "git commit -m x")
+        result = self.call("root-architect-execution:impl-executor", "git commit -m x")
         self.assertEqual(result.returncode, 2)
         self.assertIn("Root owns Git", result.stderr)
 
     def test_namespaced_read_only_git_still_allowed(self):
         self.assertEqual(
-            self.call("root-architect-execution:impl-executor",
-                      "git status").returncode, 0)
+            self.call("root-architect-execution:impl-executor", "git status").returncode, 0
+        )
 
     def test_namespaced_spec_validator_has_no_shell(self):
-        result = self.call("root-architect-execution:spec-validator",
-                           "python3 -m unittest x")
+        result = self.call("root-architect-execution:spec-validator", "python3 -m unittest x")
         self.assertEqual(result.returncode, 2)
 
     def test_ignores_an_unrelated_subagent(self):
-        self.assertEqual(
-            self.call("Explore", "git commit -m x").returncode, 0)
+        self.assertEqual(self.call("Explore", "git commit -m x").returncode, 0)
 
     def test_blocks_a_worker_commit(self):
         result = self.call("impl-executor", "git commit -m 'save work'")
@@ -1863,32 +2053,25 @@ class WorkerGitGuardTests(unittest.TestCase):
         self.assertIn("Root owns Git", result.stderr)
 
     def test_blocks_staging(self):
-        self.assertEqual(
-            self.call("impl-executor", "git add -A").returncode, 2)
+        self.assertEqual(self.call("impl-executor", "git add -A").returncode, 2)
 
     def test_blocks_git_hidden_behind_a_chained_command(self):
-        result = self.call("impl-executor",
-                           "python3 -m unittest x && git commit -am wip")
+        result = self.call("impl-executor", "python3 -m unittest x && git commit -am wip")
         self.assertEqual(result.returncode, 2)
 
     def test_blocks_an_absolute_git_path(self):
-        self.assertEqual(
-            self.call("impl-executor", "/usr/bin/git push origin HEAD").returncode, 2)
+        self.assertEqual(self.call("impl-executor", "/usr/bin/git push origin HEAD").returncode, 2)
 
     def test_allows_read_only_git_inspection(self):
-        for command in ("git status", "git diff --stat", "git log -1",
-                        "git rev-parse HEAD"):
+        for command in ("git status", "git diff --stat", "git log -1", "git rev-parse HEAD"):
             with self.subTest(command=command):
-                self.assertEqual(
-                    self.call("impl-executor", command).returncode, 0)
+                self.assertEqual(self.call("impl-executor", command).returncode, 0)
 
     def test_allows_an_ordinary_test_command(self):
-        self.assertEqual(
-            self.call("impl-executor", "python3 -m unittest discover").returncode, 0)
+        self.assertEqual(self.call("impl-executor", "python3 -m unittest discover").returncode, 0)
 
     def test_does_not_match_a_word_merely_containing_git(self):
-        self.assertEqual(
-            self.call("impl-executor", "python3 digit_tool.py --legit").returncode, 0)
+        self.assertEqual(self.call("impl-executor", "python3 digit_tool.py --legit").returncode, 0)
 
     def test_spec_validator_has_no_shell(self):
         result = self.call("spec-validator", "python3 -m unittest x")
@@ -1901,17 +2084,19 @@ class WorkerGitGuardTests(unittest.TestCase):
         self.assertIn("fixes nothing", result.stderr)
 
     def test_quality_validator_may_run_commands_but_not_edit(self):
-        self.assertEqual(
-            self.call("quality-validator", "python3 -m unittest x").returncode, 0)
+        self.assertEqual(self.call("quality-validator", "python3 -m unittest x").returncode, 0)
         self.assertEqual(self.call("quality-validator", tool="Write").returncode, 2)
 
     def raw(self, payload, stdout=None):
         """Drive the hook with an arbitrary stdin body and stdout target."""
         return subprocess.run(
             [sys.executable, str(HOOKS / "worker_git_guard.py")],
-            input=payload, capture_output=stdout is None, stdout=stdout,
+            input=payload,
+            capture_output=stdout is None,
+            stdout=stdout,
             stderr=subprocess.DEVNULL if stdout is not None else None,
-            text=True)
+            text=True,
+        )
 
     def unwritable_stdout(self):
         """See RootWriteGuardTests.unwritable_stdout — same stand-in, same why."""
@@ -1938,24 +2123,39 @@ class WorkerGitGuardTests(unittest.TestCase):
                             env["PYTHONUNBUFFERED"] = "1"
                         else:
                             env.pop("PYTHONUNBUFFERED", None)
-                        payload = json.dumps({
-                            "agent_type": "impl-executor", "tool_name": "Bash",
-                            "tool_input": {"command": command}})
+                        payload = json.dumps(
+                            {
+                                "agent_type": "impl-executor",
+                                "tool_name": "Bash",
+                                "tool_input": {"command": command},
+                            }
+                        )
                         result = subprocess.run(
                             [sys.executable, str(HOOKS / "worker_git_guard.py")],
-                            input=payload, text=True, env=env,
-                            stdout=devfull, stderr=subprocess.DEVNULL)
+                            input=payload,
+                            text=True,
+                            env=env,
+                            stdout=devfull,
+                            stderr=subprocess.DEVNULL,
+                        )
                         self.assertEqual(result.returncode, 2)
 
     def test_validator_edit_denial_also_survives_an_unwritable_stdout(self):
         with self.unwritable_stdout() as devfull:
-            payload = json.dumps({"agent_type": "spec-validator",
-                                  "tool_name": "Edit",
-                                  "tool_input": {"file_path": "x.py"}})
+            payload = json.dumps(
+                {
+                    "agent_type": "spec-validator",
+                    "tool_name": "Edit",
+                    "tool_input": {"file_path": "x.py"},
+                }
+            )
             result = subprocess.run(
                 [sys.executable, str(HOOKS / "worker_git_guard.py")],
-                input=payload, text=True, stdout=devfull,
-                stderr=subprocess.DEVNULL)
+                input=payload,
+                text=True,
+                stdout=devfull,
+                stderr=subprocess.DEVNULL,
+            )
         self.assertEqual(result.returncode, 2)
 
     def test_no_payload_shape_produces_a_traceback(self):
@@ -1971,29 +2171,54 @@ class WorkerGitGuardTests(unittest.TestCase):
             ("[1, 2, 3]", 0),
             ('"a bare string"', 0),
             ("null", 0),
-            (json.dumps({"agent_type": [1], "tool_name": "Bash",
-                         "tool_input": {"command": "git push"}}), 0),
-            (json.dumps({"agent_type": 7, "tool_name": "Bash",
-                         "tool_input": {"command": "git push"}}), 0),
-            (json.dumps({"tool_name": "Bash",
-                         "tool_input": {"command": "git commit"}}), 0),
-            (json.dumps({"agent_type": "impl-executor",
-                         "tool_name": ["Bash"], "tool_input": {}}), 2),
-            (json.dumps({"agent_type": "impl-executor",
-                         "tool_name": {"a": 1}, "tool_input": {}}), 2),
-            (json.dumps({"agent_type": "spec-validator",
-                         "tool_name": None, "tool_input": {}}), 2),
-            (json.dumps({"agent_type": "impl-executor", "tool_name": "Bash",
-                         "tool_input": [1, 2]}), 2),
-            (json.dumps({"agent_type": "impl-executor", "tool_name": "Bash",
-                         "tool_input": "a string"}), 2),
+            (
+                json.dumps(
+                    {"agent_type": [1], "tool_name": "Bash", "tool_input": {"command": "git push"}}
+                ),
+                0,
+            ),
+            (
+                json.dumps(
+                    {"agent_type": 7, "tool_name": "Bash", "tool_input": {"command": "git push"}}
+                ),
+                0,
+            ),
+            (json.dumps({"tool_name": "Bash", "tool_input": {"command": "git commit"}}), 0),
+            (
+                json.dumps(
+                    {"agent_type": "impl-executor", "tool_name": ["Bash"], "tool_input": {}}
+                ),
+                2,
+            ),
+            (
+                json.dumps(
+                    {"agent_type": "impl-executor", "tool_name": {"a": 1}, "tool_input": {}}
+                ),
+                2,
+            ),
+            (json.dumps({"agent_type": "spec-validator", "tool_name": None, "tool_input": {}}), 2),
+            (
+                json.dumps(
+                    {"agent_type": "impl-executor", "tool_name": "Bash", "tool_input": [1, 2]}
+                ),
+                2,
+            ),
+            (
+                json.dumps(
+                    {"agent_type": "impl-executor", "tool_name": "Bash", "tool_input": "a string"}
+                ),
+                2,
+            ),
         ]
         for payload, expected in cases:
             with self.subTest(payload=payload[:60]):
                 result = self.raw(payload)
-                self.assertIn(result.returncode, (0, 2),
-                              "exit %s is neither a clean allow nor a block; "
-                              "stderr:\n%s" % (result.returncode, result.stderr))
+                self.assertIn(
+                    result.returncode,
+                    (0, 2),
+                    "exit %s is neither a clean allow nor a block; "
+                    "stderr:\n%s" % (result.returncode, result.stderr),
+                )
                 self.assertEqual(result.returncode, expected)
                 self.assertNotIn("Traceback", result.stderr)
 
@@ -2011,17 +2236,21 @@ class OrchestratorRoleTests(unittest.TestCase):
 
     def sandbox(self):
         dest = self.scratch / "tree"
-        shutil.copytree(ROOT, dest, ignore=shutil.ignore_patterns(
-            ".git", "__pycache__", "*.pyc", "dist"))
+        shutil.copytree(
+            ROOT, dest, ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", "dist")
+        )
         return dest
 
     def gate(self, root=None):
         return subprocess.run(
             [sys.executable, str((root or ROOT) / "scripts/validate_roles.py")],
-            capture_output=True, text=True, cwd=str(root or ROOT))
+            capture_output=True,
+            text=True,
+            cwd=str(root or ROOT),
+        )
 
     def roles(self):
-        return {f: r for f, r in render_agents.load_roles()}
+        return dict(render_agents.load_roles())
 
     def test_every_manifest_declares_its_kind(self):
         for role_file, role in self.roles().items():
@@ -2044,9 +2273,11 @@ class OrchestratorRoleTests(unittest.TestCase):
         for role_file, role in self.roles().items():
             with self.subTest(role=role_file):
                 delegates = "delegate" in role["tools"]["allow"]
-                self.assertEqual(delegates,
-                                 role["kind"] in ("orchestrator", "root"),
-                                 "only the dispatchers hold delegation")
+                self.assertEqual(
+                    delegates,
+                    role["kind"] in ("orchestrator", "root"),
+                    "only the dispatchers hold delegation",
+                )
 
     def test_the_orchestrator_cannot_touch_source(self):
         """It dispatches work; it does not do it."""
@@ -2064,8 +2295,7 @@ class OrchestratorRoleTests(unittest.TestCase):
         (tree / "roles/second-implementer.json").write_text(json.dumps(extra, indent=2))
 
         result = self.gate(tree)
-        self.assertEqual(result.returncode, 1,
-                         "a fourth worker manifest passed the gate")
+        self.assertEqual(result.returncode, 1, "a fourth worker manifest passed the gate")
         self.assertIn("fixed three-agent", result.stdout + result.stderr)
 
     def test_a_second_orchestrator_is_refused(self):
@@ -2087,10 +2317,10 @@ class OrchestratorRoleTests(unittest.TestCase):
         path.write_text(json.dumps(role, indent=2))
 
         result = self.gate(tree)
-        self.assertEqual(result.returncode, 1,
-                         "a worker was granted delegation and the gate allowed it")
-        self.assertIn("only the orchestrator dispatches",
-                      result.stdout + result.stderr)
+        self.assertEqual(
+            result.returncode, 1, "a worker was granted delegation and the gate allowed it"
+        )
+        self.assertIn("only the orchestrator dispatches", result.stdout + result.stderr)
 
     def test_an_orchestrator_without_delegation_is_refused(self):
         """It would have nothing to orchestrate.
@@ -2108,8 +2338,7 @@ class OrchestratorRoleTests(unittest.TestCase):
 
         result = self.gate(tree)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("would have nothing to orchestrate",
-                      result.stdout + result.stderr)
+        self.assertIn("would have nothing to orchestrate", result.stdout + result.stderr)
 
     def test_the_unenforceable_delegation_scope_is_disclosed(self):
         """Agent(type) binds only for the main thread; the orchestrator is not.
@@ -2123,18 +2352,21 @@ class OrchestratorRoleTests(unittest.TestCase):
         # render_agents.py left it passing - it was guarding the output of a
         # build nobody had re-run.
         host = render_agents.load_host("claude-code")
-        role = next(r for _, r in render_agents.load_roles()
-                    if r["kind"] == "orchestrator")
-        notes = " ".join(render_agents.disclosures(
-            role, host, render_agents.resolve_tools(role, host)[2]))
+        role = next(r for _, r in render_agents.load_roles() if r["kind"] == "orchestrator")
+        notes = " ".join(
+            render_agents.disclosures(role, host, render_agents.resolve_tools(role, host)[2])
+        )
         self.assertIn("Which agents you may dispatch is **not enforced**", notes)
 
         generated = (CLAUDE_AGENTS / "orchestrator.md").read_text(encoding="utf-8")
         self.assertIn("Which agents you may dispatch is **not enforced**", generated)
 
         worker = (CLAUDE_AGENTS / "impl-executor.md").read_text(encoding="utf-8")
-        self.assertNotIn("Which agents you may dispatch", worker,
-                         "a worker holds no delegation, so the disclosure is noise there")
+        self.assertNotIn(
+            "Which agents you may dispatch",
+            worker,
+            "a worker holds no delegation, so the disclosure is noise there",
+        )
 
 
 class MailboxTests(unittest.TestCase):
@@ -2156,10 +2388,15 @@ class MailboxTests(unittest.TestCase):
         return mailbox.post(**kwargs)
 
     def dispatch_and_report(self, body=b"done\n"):
-        self.post(kind="task", sender="orchestrator", recipient="worker:implementer",
-                  body=b"do the thing\n")
-        return self.post(kind="report", sender="worker:implementer",
-                         recipient="orchestrator", body=body)
+        self.post(
+            kind="task",
+            sender="orchestrator",
+            recipient="worker:implementer",
+            body=b"do the thing\n",
+        )
+        return self.post(
+            kind="report", sender="worker:implementer", recipient="orchestrator", body=body
+        )
 
     # --- verbatim ---------------------------------------------------------
 
@@ -2182,17 +2419,25 @@ class MailboxTests(unittest.TestCase):
             handle.write(b"I never said this\n")
 
         problems = mailbox.verify(str(self.workspace), "r1")
-        self.assertTrue(any("does not match its recorded hash" in p for p in problems),
-                        "a tampered envelope verified clean: %s" % problems)
+        self.assertTrue(
+            any("does not match its recorded hash" in p for p in problems),
+            "a tampered envelope verified clean: %s" % problems,
+        )
 
     # --- append-only ------------------------------------------------------
 
     def test_an_envelope_is_never_overwritten(self):
-        self.post(kind="task", sender="orchestrator",
-                  recipient="worker:implementer", body=b"first\n")
+        self.post(
+            kind="task", sender="orchestrator", recipient="worker:implementer", body=b"first\n"
+        )
         with self.assertRaises(mailbox.MailboxError) as caught:
-            self.post(kind="task", sender="orchestrator",
-                      recipient="worker:implementer", body=b"second\n", seq=1)
+            self.post(
+                kind="task",
+                sender="orchestrator",
+                recipient="worker:implementer",
+                body=b"second\n",
+                seq=1,
+            )
         self.assertIn("append-only", str(caught.exception))
 
     def test_numbering_refuses_to_work_around_an_unreadable_envelope(self):
@@ -2201,14 +2446,19 @@ class MailboxTests(unittest.TestCase):
         An earlier revision skipped, and two envelopes both came out as seq 1 -
         the module's own failure mode, committed by the module.
         """
-        self.post(kind="task", sender="orchestrator",
-                  recipient="worker:implementer", body=b"fine\n")
+        self.post(
+            kind="task", sender="orchestrator", recipient="worker:implementer", body=b"fine\n"
+        )
         broken = mailbox.mailbox_dir(str(self.workspace), "r1") / "0009-junk.md"
         broken.write_bytes(b"not an envelope at all\n")
 
         with self.assertRaises(mailbox.MailboxError) as caught:
-            self.post(kind="report", sender="worker:implementer",
-                      recipient="orchestrator", body=b"hello\n")
+            self.post(
+                kind="report",
+                sender="worker:implementer",
+                recipient="orchestrator",
+                body=b"hello\n",
+            )
         self.assertIn("will not parse", str(caught.exception))
 
     # --- workers never write ----------------------------------------------
@@ -2216,9 +2466,13 @@ class MailboxTests(unittest.TestCase):
     def test_a_worker_cannot_be_recorded_as_the_writer(self):
         """D9. A worker holding a write tool is a grant that should not exist."""
         with self.assertRaises(mailbox.MailboxError) as caught:
-            self.post(kind="report", sender="worker:implementer",
-                      recipient="orchestrator", persisted_by="worker:implementer",
-                      body=b"hello\n")
+            self.post(
+                kind="report",
+                sender="worker:implementer",
+                recipient="orchestrator",
+                persisted_by="worker:implementer",
+                body=b"hello\n",
+            )
         self.assertIn("persisted_by", str(caught.exception))
 
     def test_a_worker_may_still_be_the_author_of_its_report(self):
@@ -2231,34 +2485,55 @@ class MailboxTests(unittest.TestCase):
     # --- silence is never success -----------------------------------------
 
     def test_a_dispatched_task_with_no_answer_is_a_problem(self):
-        self.post(kind="task", sender="orchestrator",
-                  recipient="worker:implementer", body=b"do it\n")
+        self.post(
+            kind="task", sender="orchestrator", recipient="worker:implementer", body=b"do it\n"
+        )
         problems = mailbox.verify(str(self.workspace), "r1")
-        self.assertTrue(any("nothing came back" in p for p in problems),
-                        "a vanished task verified clean: %s" % problems)
+        self.assertTrue(
+            any("nothing came back" in p for p in problems),
+            "a vanished task verified clean: %s" % problems,
+        )
 
     def test_sealing_the_silence_resolves_it(self):
-        self.post(kind="task", sender="orchestrator",
-                  recipient="worker:implementer", body=b"do it\n")
-        self.post(kind="failure", sender="worker:implementer",
-                  recipient="orchestrator", body=b"nothing returned\n",
-                  failure_mode="killed")
+        self.post(
+            kind="task", sender="orchestrator", recipient="worker:implementer", body=b"do it\n"
+        )
+        self.post(
+            kind="failure",
+            sender="worker:implementer",
+            recipient="orchestrator",
+            body=b"nothing returned\n",
+            failure_mode="killed",
+        )
         self.assertEqual(mailbox.verify(str(self.workspace), "r1"), [])
 
     def test_a_failure_envelope_must_name_its_mode(self):
         """'It failed' without saying how is the silence this replaces."""
         with self.assertRaises(mailbox.MailboxError) as caught:
-            self.post(kind="failure", sender="worker:implementer",
-                      recipient="orchestrator", body=b"nope\n")
+            self.post(
+                kind="failure",
+                sender="worker:implementer",
+                recipient="orchestrator",
+                body=b"nope\n",
+            )
         self.assertIn("failure_mode", str(caught.exception))
 
     # --- diagnostics, not tracebacks --------------------------------------
 
     def test_a_malformed_envelope_is_reported_not_raised_as_a_traceback(self):
         result = subprocess.run(
-            [sys.executable, str(ROOT / "scripts/mailbox.py"),
-             "--workspace", str(self.workspace), "verify", "--run-id", "r1"],
-            capture_output=True, text=True)
+            [
+                sys.executable,
+                str(ROOT / "scripts/mailbox.py"),
+                "--workspace",
+                str(self.workspace),
+                "verify",
+                "--run-id",
+                "r1",
+            ],
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
 
@@ -2288,27 +2563,36 @@ class JobQueueTests(unittest.TestCase):
         subject. What this does assert, by existing at all, is that a run
         cannot be queued without it - remove this and every test below fails.
         """
-        path = (self.workspace / ".root-architect" / "preflight"
-                / ("%s.json" % (run_id or self.RUN)))
+        path = self.workspace / ".root-architect" / "preflight" / ("%s.json" % (run_id or self.RUN))
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"run_id": run_id or self.RUN,
-                                    "passed": passed, "refusals": []}) + "\n")
+        path.write_text(
+            json.dumps({"run_id": run_id or self.RUN, "passed": passed, "refusals": []}) + "\n"
+        )
         return path
 
     def seed(self, tasks=None):
         tasks = tasks or [
-            {"name": "build-parser", "worker": "worker:implementer",
-             "brief": "briefs/parser.json"},
-            {"name": "check-plan", "worker": "worker:spec-validator",
-             "brief": "briefs/parser.json"},
+            {"name": "build-parser", "worker": "worker:implementer", "brief": "briefs/parser.json"},
+            {
+                "name": "check-plan",
+                "worker": "worker:spec-validator",
+                "brief": "briefs/parser.json",
+            },
         ]
         return job_queue.init(self.ws, self.RUN, tasks)
 
     def answer(self, name="build-parser"):
         """Dispatch a task and post the envelope that answers it."""
         job_queue.mark(self.ws, self.RUN, name, "dispatched")
-        path = mailbox.post(self.ws, self.RUN, "report", "worker:implementer",
-                            "orchestrator", "orchestrator", b"done\n")
+        path = mailbox.post(
+            self.ws,
+            self.RUN,
+            "report",
+            "worker:implementer",
+            "orchestrator",
+            "orchestrator",
+            b"done\n",
+        )
         job_queue.mark(self.ws, self.RUN, name, "returned", path.name)
         return path
 
@@ -2321,8 +2605,7 @@ class JobQueueTests(unittest.TestCase):
         for backwards in ("dispatched", "returned"):
             with self.subTest(to=backwards):
                 with self.assertRaises(job_queue.JobQueueError) as caught:
-                    job_queue.mark(self.ws, self.RUN, "build-parser", backwards,
-                                   "whatever.md")
+                    job_queue.mark(self.ws, self.RUN, "build-parser", backwards, "whatever.md")
                 self.assertIn("monotonic", str(caught.exception))
 
     def test_an_answered_task_must_name_its_envelope(self):
@@ -2335,8 +2618,7 @@ class JobQueueTests(unittest.TestCase):
                 # mark()'s own wording, not just any mention of an envelope:
                 # validate() refuses this on save as well, so an assertion on
                 # the word alone passed whether or not mark() checked at all.
-                self.assertIn("needs the envelope that answered it",
-                              str(caught.exception))
+                self.assertIn("needs the envelope that answered it", str(caught.exception))
 
     def test_only_one_task_is_out_at_a_time(self):
         """dispatch_state reads one open dispatch; two would blind the guard."""
@@ -2349,12 +2631,12 @@ class JobQueueTests(unittest.TestCase):
     def test_next_returns_tasks_in_order_then_nothing(self):
         self.seed()
         self.assertEqual(
-            job_queue.next_task(job_queue.load(self.ws, self.RUN))["name"],
-            "build-parser")
+            job_queue.next_task(job_queue.load(self.ws, self.RUN))["name"], "build-parser"
+        )
         self.answer("build-parser")
         self.assertEqual(
-            job_queue.next_task(job_queue.load(self.ws, self.RUN))["name"],
-            "check-plan")
+            job_queue.next_task(job_queue.load(self.ws, self.RUN))["name"], "check-plan"
+        )
         self.answer("check-plan")
         self.assertIsNone(job_queue.next_task(job_queue.load(self.ws, self.RUN)))
 
@@ -2385,12 +2667,15 @@ class JobQueueTests(unittest.TestCase):
         """The queue must not record work the record of the work lacks."""
         self.seed()
         job_queue.mark(self.ws, self.RUN, "build-parser", "dispatched")
-        job_queue.mark(self.ws, self.RUN, "build-parser", "returned",
-                       "0002-report-worker-implementer.md")
+        job_queue.mark(
+            self.ws, self.RUN, "build-parser", "returned", "0002-report-worker-implementer.md"
+        )
 
         problems = job_queue.verify(self.ws, self.RUN)
-        self.assertTrue(any("not in the mailbox" in p for p in problems),
-                        "a queue citing a missing envelope verified clean: %s" % problems)
+        self.assertTrue(
+            any("not in the mailbox" in p for p in problems),
+            "a queue citing a missing envelope verified clean: %s" % problems,
+        )
 
     def test_an_unanswered_task_pointing_at_an_answer_is_caught(self):
         """Bookkeeping that would read as progress."""
@@ -2401,14 +2686,25 @@ class JobQueueTests(unittest.TestCase):
         path.write_text(json.dumps(document, indent=2), encoding="utf-8")
 
         problems = job_queue.verify(self.ws, self.RUN)
-        self.assertTrue(any("already names an envelope" in p for p in problems),
-                        "a pending task citing an answer verified clean: %s" % problems)
+        self.assertTrue(
+            any("already names an envelope" in p for p in problems),
+            "a pending task citing an answer verified clean: %s" % problems,
+        )
 
     def test_a_missing_queue_is_reported_not_raised_as_a_traceback(self):
         result = subprocess.run(
-            [sys.executable, str(ROOT / "scripts/job_queue.py"),
-             "--workspace", self.ws, "verify", "--run-id", self.RUN],
-            capture_output=True, text=True)
+            [
+                sys.executable,
+                str(ROOT / "scripts/job_queue.py"),
+                "--workspace",
+                self.ws,
+                "verify",
+                "--run-id",
+                self.RUN,
+            ],
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
 
@@ -2428,13 +2724,17 @@ class AgentInterfaceTests(unittest.TestCase):
     def run_gate(self, root=None):
         return subprocess.run(
             [sys.executable, str((root or ROOT) / "scripts/validate_interfaces.py")],
-            capture_output=True, text=True, cwd=str(root or ROOT))
+            capture_output=True,
+            text=True,
+            cwd=str(root or ROOT),
+        )
 
     def sandbox(self):
         """A throwaway copy of the repository, for mutation."""
         dest = self.scratch / "tree"
-        shutil.copytree(ROOT, dest, ignore=shutil.ignore_patterns(
-            ".git", "__pycache__", "*.pyc", "dist"))
+        shutil.copytree(
+            ROOT, dest, ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", "dist")
+        )
         return dest
 
     def interfaces(self):
@@ -2447,8 +2747,10 @@ class AgentInterfaceTests(unittest.TestCase):
                 document = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(validator.validate(document), [])
                 self.assertEqual(
-                    document["host"], path.parent.name,
-                    "an interface must not describe a host it is not filed under")
+                    document["host"],
+                    path.parent.name,
+                    "an interface must not describe a host it is not filed under",
+                )
 
     def test_the_gate_passes_on_the_repository_as_it_stands(self):
         result = self.run_gate()
@@ -2465,7 +2767,8 @@ class AgentInterfaceTests(unittest.TestCase):
                         self.assertTrue(
                             (prov.get("quote") or "").strip(),
                             "a first-party claim without the source's own words "
-                            "is a claim nobody can re-check")
+                            "is a claim nobody can re-check",
+                        )
 
     def test_unsourced_claims_bear_no_weight(self):
         """`unsourced` must never carry evidence filed under the wrong level."""
@@ -2479,7 +2782,8 @@ class AgentInterfaceTests(unittest.TestCase):
                         self.assertTrue(
                             (prov.get("caveat") or "").strip(),
                             "an unsourced claim with no caveat cannot be told "
-                            "apart from one nobody checked")
+                            "apart from one nobody checked",
+                        )
 
     def test_corpus_derived_claims_state_their_sample_size(self):
         for path in self.interfaces():
@@ -2517,11 +2821,13 @@ class AgentInterfaceTests(unittest.TestCase):
         path.write_text(json.dumps(document, indent=2), encoding="utf-8")
         self.assertTrue(
             (tree / "adapters/claude-code/agents/orchestrator.md").exists(),
-            "fixture broken: the built artifact this test attacks is gone")
+            "fixture broken: the built artifact this test attacks is gone",
+        )
 
         result = self.run_gate(tree)
-        self.assertEqual(result.returncode, 1,
-                         "a generated agent kept resting on unsourced nesting")
+        self.assertEqual(
+            result.returncode, 1, "a generated agent kept resting on unsourced nesting"
+        )
         self.assertIn("orchestrator.md", result.stderr)
         self.assertIn("unsourced", result.stderr.lower())
 
@@ -2537,8 +2843,9 @@ class AgentInterfaceTests(unittest.TestCase):
         (stale / "orchestrator.md").write_text("stale\n", encoding="utf-8")
 
         result = self.run_gate(tree)
-        self.assertEqual(result.returncode, 1,
-                         "a leftover agent file for an unsupported host passed")
+        self.assertEqual(
+            result.returncode, 1, "a leftover agent file for an unsupported host passed"
+        )
         self.assertIn("leftover", result.stderr)
 
     def test_gate_rejects_drift_between_interface_and_host_manifest(self):
@@ -2554,9 +2861,11 @@ class AgentInterfaceTests(unittest.TestCase):
         path.write_text(json.dumps(document, indent=2), encoding="utf-8")
 
         result = self.run_gate(tree)
-        self.assertEqual(result.returncode, 1,
-                         "the interface contradicted hosts/claude-code.json and "
-                         "the gate allowed it")
+        self.assertEqual(
+            result.returncode,
+            1,
+            "the interface contradicted hosts/claude-code.json and the gate allowed it",
+        )
         self.assertIn("drift", result.stderr)
 
     def test_gate_rejects_a_first_party_claim_with_no_quote(self):
@@ -2577,14 +2886,18 @@ class AgentInterfaceTests(unittest.TestCase):
                 prov.pop("quote")
                 break
         else:
-            self.fail("no first-party claim to strip - the fixture this test "
-                      "depends on is gone, so it is no longer testing anything")
+            self.fail(
+                "no first-party claim to strip - the fixture this test "
+                "depends on is gone, so it is no longer testing anything"
+            )
         path.write_text(json.dumps(document, indent=2), encoding="utf-8")
 
         result = self.run_gate(tree)
-        self.assertEqual(result.returncode, 1,
-                         "a first-party claim lost its quote and the gate "
-                         "still called the interface sound")
+        self.assertEqual(
+            result.returncode,
+            1,
+            "a first-party claim lost its quote and the gate still called the interface sound",
+        )
 
     def test_gate_rejects_evidence_filed_under_unsourced(self):
         """An unsourced level carrying a source means the level is wrong."""
@@ -2600,8 +2913,7 @@ class AgentInterfaceTests(unittest.TestCase):
     def test_gate_reports_rather_than_crashes_on_malformed_json(self):
         """The error path must not error - this repository keeps closing that."""
         tree = self.sandbox()
-        (tree / "adapters/cursor/agent-interface.json").write_text(
-            "{ not json", encoding="utf-8")
+        (tree / "adapters/cursor/agent-interface.json").write_text("{ not json", encoding="utf-8")
 
         result = self.run_gate(tree)
         self.assertEqual(result.returncode, 1)
@@ -2625,30 +2937,32 @@ class RootAgentTests(unittest.TestCase):
         self.scratch = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.scratch, ignore_errors=True)
         self.host = render_agents.load_host("claude-code")
-        self.root = next(r for _f, r in render_agents.load_roles()
-                         if r["kind"] == "root")
+        self.root = next(r for _f, r in render_agents.load_roles() if r["kind"] == "root")
 
     def sandbox(self):
         """A throwaway copy. Numbered, because two per test is normal here -
         a rule usually has a violating half and a control half.
         """
         dest = self.scratch / ("tree%d" % len(list(self.scratch.iterdir())))
-        shutil.copytree(ROOT, dest, ignore=shutil.ignore_patterns(
-            ".git", "__pycache__", "*.pyc", "dist"))
+        shutil.copytree(
+            ROOT, dest, ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", "dist")
+        )
         return dest
 
     def gate(self, root):
         return subprocess.run(
             [sys.executable, str(root / "scripts/validate_roles.py")],
-            capture_output=True, text=True, cwd=str(root))
+            capture_output=True,
+            text=True,
+            cwd=str(root),
+        )
 
     # --- dispatched or not, which decides what the host must support -------
 
     def test_root_is_the_only_agent_nobody_dispatches(self):
         for _f, role in render_agents.load_roles():
             with self.subTest(role=role["id"]):
-                self.assertEqual(render_agents.is_dispatched(role),
-                                 role["kind"] != "root")
+                self.assertEqual(render_agents.is_dispatched(role), role["kind"] != "root")
 
     def test_root_does_not_need_nested_delegation(self):
         """The distinction that decides which hosts can carry root.
@@ -2658,8 +2972,9 @@ class RootAgentTests(unittest.TestCase):
         separates them: its nesting is unsourced, so the orchestrator may not
         be built there - and root's eligibility must not inherit that refusal.
         """
-        orchestrator = next(r for _f, r in render_agents.load_roles()
-                            if r["kind"] == "orchestrator")
+        orchestrator = next(
+            r for _f, r in render_agents.load_roles() if r["kind"] == "orchestrator"
+        )
         built, reason = render_agents.role_targets_host(orchestrator, "cursor")
         self.assertFalse(built)
         self.assertIn("nested delegation is unsourced", reason)
@@ -2673,13 +2988,24 @@ class RootAgentTests(unittest.TestCase):
         path = tree / "adapters/cursor/agent-interface.json"
         interface = json.loads(path.read_text())
         interface["delegation"]["provenance"] = {
-            "level": "unsourced", "caveat": "blanked for this test"}
+            "level": "unsourced",
+            "caveat": "blanked for this test",
+        }
         path.write_text(json.dumps(interface, indent=2))
 
         result = subprocess.run(
-            [sys.executable, str(tree / "scripts/render_agents.py"),
-             "--host", "cursor", "--out", str(self.scratch / "out")],
-            capture_output=True, text=True, cwd=str(tree))
+            [
+                sys.executable,
+                str(tree / "scripts/render_agents.py"),
+                "--host",
+                "cursor",
+                "--out",
+                str(self.scratch / "out"),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(tree),
+        )
         self.assertEqual(result.returncode, 0)
         self.assertIn("skipped root-architect", result.stdout)
         self.assertIn("delegation is unsourced", result.stdout)
@@ -2693,8 +3019,11 @@ class RootAgentTests(unittest.TestCase):
         self.assertIn("Dispatch scope is enforced", note)
 
         generated = (CLAUDE_AGENTS / "root-architect.md").read_text(encoding="utf-8")
-        self.assertIn("tools: Read, Grep, Glob, Edit, Write, Bash, "
-                      "Agent(root-architect-execution:orchestrator)", generated)
+        self.assertIn(
+            "tools: Read, Grep, Glob, Edit, Write, Bash, "
+            "Agent(root-architect-execution:orchestrator)",
+            generated,
+        )
 
     def test_the_type_name_follows_the_plugin_manifest(self):
         """A wrong type name fails silently: it matches no agent at all.
@@ -2710,9 +3039,18 @@ class RootAgentTests(unittest.TestCase):
         manifest.write_text(json.dumps(plugin, indent=2))
 
         result = subprocess.run(
-            [sys.executable, str(tree / "scripts/render_agents.py"),
-             "--host", "claude-code", "--out", str(self.scratch / "out")],
-            capture_output=True, text=True, cwd=str(tree))
+            [
+                sys.executable,
+                str(tree / "scripts/render_agents.py"),
+                "--host",
+                "claude-code",
+                "--out",
+                str(self.scratch / "out"),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(tree),
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         text = (self.scratch / "out/root-architect.md").read_text(encoding="utf-8")
         self.assertIn("Agent(renamed-plugin:orchestrator)", text)
@@ -2724,8 +3062,9 @@ class RootAgentTests(unittest.TestCase):
         name. It was an `if host == "claude-code"` before root existed, which
         made the claim true by coincidence.
         """
-        orchestrator = next(r for _f, r in render_agents.load_roles()
-                            if r["kind"] == "orchestrator")
+        orchestrator = next(
+            r for _f, r in render_agents.load_roles() if r["kind"] == "orchestrator"
+        )
         _n, enforced, note = render_agents.delegation_scope(orchestrator, self.host)
         self.assertFalse(enforced)
         self.assertIn("Which agents you may dispatch is **not enforced**", note)
@@ -2750,7 +3089,7 @@ class RootAgentTests(unittest.TestCase):
 
     def test_the_startup_prompt_is_auto_submitted_where_the_host_can(self):
         generated = (CLAUDE_AGENTS / "root-architect.md").read_text(encoding="utf-8")
-        self.assertIn("initialPrompt: \"Before anything else", generated)
+        self.assertIn('initialPrompt: "Before anything else', generated)
         self.assertIn("## Startup", generated)
 
     def test_a_host_with_no_auto_submission_discloses_it(self):
@@ -2779,22 +3118,33 @@ class RootAgentTests(unittest.TestCase):
         path.write_text(json.dumps(role, indent=2))
 
         result = subprocess.run(
-            [sys.executable, str(tree / "scripts/render_agents.py"),
-             "--host", "claude-code", "--out", str(self.scratch / "out")],
-            capture_output=True, text=True, cwd=str(tree))
+            [
+                sys.executable,
+                str(tree / "scripts/render_agents.py"),
+                "--host",
+                "claude-code",
+                "--out",
+                str(self.scratch / "out"),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(tree),
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
-        line = next(l for l in (self.scratch / "out/root-architect.md")
-                    .read_text(encoding="utf-8").splitlines()
-                    if l.startswith("initialPrompt:"))
-        self.assertEqual(line,
-                         'initialPrompt: "note: run \\"the check\\" \\\\ now"')
+        line = next(
+            entry
+            for entry in (self.scratch / "out/root-architect.md")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if entry.startswith("initialPrompt:")
+        )
+        self.assertEqual(line, 'initialPrompt: "note: run \\"the check\\" \\\\ now"')
 
     # --- root returns nothing ----------------------------------------------
 
     def test_root_is_given_no_return_contract(self):
         """An agent with nobody above it has no schema to satisfy."""
-        text = render_agents.render_markdown_yaml(
-            self.root, self.host, "root-architect.json")
+        text = render_agents.render_markdown_yaml(self.root, self.host, "root-architect.json")
         self.assertIn("You return nothing to anybody", text)
         self.assertNotIn("```json", text)
 
@@ -2809,8 +3159,7 @@ class RootAgentTests(unittest.TestCase):
 
         result = self.gate(tree)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("only root is launched rather than dispatched",
-                      result.stdout + result.stderr)
+        self.assertIn("only root is launched rather than dispatched", result.stdout + result.stderr)
 
     def test_root_may_not_dispatch_a_worker_directly(self):
         """The topology this architecture exists to prevent, in one field."""
@@ -2822,8 +3171,7 @@ class RootAgentTests(unittest.TestCase):
 
         result = self.gate(tree)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("reaches a worker is the topology",
-                      result.stdout + result.stderr)
+        self.assertIn("reaches a worker is the topology", result.stdout + result.stderr)
 
     def test_a_scope_naming_an_agent_nobody_ships_is_refused(self):
         tree = self.sandbox()
@@ -2834,30 +3182,28 @@ class RootAgentTests(unittest.TestCase):
 
         result = self.gate(tree)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("which no role manifest fills",
-                      result.stdout + result.stderr)
+        self.assertIn("which no role manifest fills", result.stdout + result.stderr)
 
     def test_the_manifest_and_the_shipped_guard_must_agree(self):
         """Either half alone is a claim; only together are they a boundary."""
         tree = self.sandbox()
         path = tree / "roles/root-architect.json"
         role = json.loads(path.read_text())
-        role["must_not"] = [m for m in role["must_not"]
-                            if m != "interfere-with-dispatch"]
+        role["must_not"] = [m for m in role["must_not"] if m != "interfere-with-dispatch"]
         path.write_text(json.dumps(role, indent=2))
 
         result = self.gate(tree)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("the one prohibition the shipped hook enforces",
-                      result.stdout + result.stderr)
+        self.assertIn(
+            "the one prohibition the shipped hook enforces", result.stdout + result.stderr
+        )
 
         tree = self.sandbox()
         for guard in tree.glob("adapters/*/hooks/root_write_guard.py"):
             guard.unlink()
         result = self.gate(tree)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("no adapter ships hooks/root_write_guard.py",
-                      result.stdout + result.stderr)
+        self.assertIn("no adapter ships hooks/root_write_guard.py", result.stdout + result.stderr)
 
 
 class PreflightTests(unittest.TestCase):
@@ -2876,11 +3222,18 @@ class PreflightTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.workspace, ignore_errors=True)
         self.ws = str(self.workspace)
 
-    def observe(self, tools=("Read", "Grep", "Glob", "Edit", "Write", "Bash", "Agent"),
-                agent_types=("root-architect-execution:orchestrator",), raw=None):
+    def observe(
+        self,
+        tools=("Read", "Grep", "Glob", "Edit", "Write", "Bash", "Agent"),
+        agent_types=("root-architect-execution:orchestrator",),
+        raw=None,
+    ):
         path = self.workspace / "observed.json"
-        path.write_text(raw if raw is not None else json.dumps(
-            {"tools": list(tools), "agent_types": list(agent_types)}))
+        path.write_text(
+            raw
+            if raw is not None
+            else json.dumps({"tools": list(tools), "agent_types": list(agent_types)})
+        )
         return str(path)
 
     def check(self, **kwargs):
@@ -2891,18 +3244,17 @@ class PreflightTests(unittest.TestCase):
     def test_expectations_come_from_the_manifests_not_a_second_list(self):
         expected = root_preflight.expectations("claude-code")
         self.assertEqual(expected["delegate_tools"], ["Agent"])
-        self.assertEqual(expected["agent_types"],
-                         ["root-architect-execution:orchestrator"])
+        self.assertEqual(expected["agent_types"], ["root-architect-execution:orchestrator"])
 
     # --- the two questions D11 names ---------------------------------------
 
     def test_a_sound_session_passes_and_is_recorded(self):
         record = self.check()
         self.assertTrue(record["passed"])
-        on_disk = json.loads(root_preflight.record_path(self.ws, self.RUN)
-                             .read_text())
-        self.assertEqual(on_disk["observed"]["agent_types"],
-                         ["root-architect-execution:orchestrator"])
+        on_disk = json.loads(root_preflight.record_path(self.ws, self.RUN).read_text())
+        self.assertEqual(
+            on_disk["observed"]["agent_types"], ["root-architect-execution:orchestrator"]
+        )
 
     def test_a_missing_dispatch_tool_is_refused(self):
         """The depth cap, or a launch that was never a main-thread agent."""
@@ -2913,8 +3265,7 @@ class PreflightTests(unittest.TestCase):
     def test_dispatching_more_than_the_scope_is_refused(self):
         """The failure the whole check exists for: the restriction did not bind."""
         with self.assertRaises(root_preflight.PreflightError) as caught:
-            self.check(agent_types=("root-architect-execution:orchestrator",
-                                    "general-purpose"))
+            self.check(agent_types=("root-architect-execution:orchestrator", "general-purpose"))
         self.assertIn("types you were not granted", str(caught.exception))
 
     def test_a_scope_that_reaches_nothing_is_refused(self):
@@ -2926,8 +3277,7 @@ class PreflightTests(unittest.TestCase):
         """A refused run and an unchecked one must not look the same after."""
         with self.assertRaises(root_preflight.PreflightError):
             self.check(agent_types=("anything",))
-        record = json.loads(root_preflight.record_path(self.ws, self.RUN)
-                            .read_text())
+        record = json.loads(root_preflight.record_path(self.ws, self.RUN).read_text())
         self.assertFalse(record["passed"])
         self.assertTrue(record["refusals"])
 
@@ -2939,10 +3289,12 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("silence is not a pass", str(caught.exception))
 
     def test_a_malformed_observation_is_refused(self):
-        for raw in ('{"tools": "Agent", "agent_types": []}',
-                    '{"tools": []}',
-                    '["Agent"]',
-                    'not json at all'):
+        for raw in (
+            '{"tools": "Agent", "agent_types": []}',
+            '{"tools": []}',
+            '["Agent"]',
+            "not json at all",
+        ):
             with self.subTest(raw=raw):
                 with self.assertRaises(root_preflight.PreflightError):
                     root_preflight.run(self.ws, self.RUN, self.observe(raw=raw))
@@ -2951,8 +3303,7 @@ class PreflightTests(unittest.TestCase):
 
     def test_a_run_cannot_be_queued_without_a_passing_check(self):
         """What makes D11 a gate rather than advice."""
-        tasks = [{"name": "t", "worker": "worker:implementer",
-                  "brief": "briefs/t.json"}]
+        tasks = [{"name": "t", "worker": "worker:implementer", "brief": "briefs/t.json"}]
         with self.assertRaises(job_queue.JobQueueError) as caught:
             job_queue.init(self.ws, self.RUN, tasks)
         self.assertIn("no startup check on record", str(caught.exception))
@@ -2992,9 +3343,18 @@ class PreflightTests(unittest.TestCase):
         target = self.workspace / "codex-target"
 
         result = subprocess.run(
-            [sys.executable, str(bundle / "install.py"),
-             "--target", str(target), "--plugin-root", "/opt/installed-plugin"],
-            capture_output=True, text=True, cwd=str(bundle))
+            [
+                sys.executable,
+                str(bundle / "install.py"),
+                "--target",
+                str(target),
+                "--plugin-root",
+                "/opt/installed-plugin",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(bundle),
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
         roles = sorted(r["id"] for _f, r in render_agents.load_roles())
@@ -3019,12 +3379,14 @@ class PreflightTests(unittest.TestCase):
 
         result = subprocess.run(
             [sys.executable, str(lonely / "install.py"), "--target", str(target)],
-            capture_output=True, text=True, cwd=str(lonely))
+            capture_output=True,
+            text=True,
+            cwd=str(lonely),
+        )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("cannot find the plugin root", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
-        self.assertFalse(target.exists(),
-                         "it created the target directory before giving up")
+        self.assertFalse(target.exists(), "it created the target directory before giving up")
 
     def test_the_two_manifests_agree_with_each_other(self):
         """The defect `claude plugin validate` exists to catch, pinned here too.
@@ -3038,18 +3400,21 @@ class PreflightTests(unittest.TestCase):
         asserted here where it cannot silently change mode.
         """
         adapter = ROOT / "adapters/claude-code"
-        manifest = json.loads(
-            (adapter / "manifest.template.json").read_text(encoding="utf-8"))
+        manifest = json.loads((adapter / "manifest.template.json").read_text(encoding="utf-8"))
         marketplace = json.loads(
-            (adapter / "marketplace.template.json").read_text(encoding="utf-8"))
-        entries = [p for p in marketplace["plugins"]
-                   if p["name"] == manifest["name"]]
-        self.assertEqual(len(entries), 1,
-                         "the marketplace names no entry for %r" % manifest["name"])
-        self.assertEqual(entries[0]["version"], manifest["version"],
-                         "plugin.json and the marketplace entry disagree on the "
-                         "version; plugin.json wins at install time and the "
-                         "marketplace entry is silently ignored")
+            (adapter / "marketplace.template.json").read_text(encoding="utf-8")
+        )
+        entries = [p for p in marketplace["plugins"] if p["name"] == manifest["name"]]
+        self.assertEqual(
+            len(entries), 1, "the marketplace names no entry for %r" % manifest["name"]
+        )
+        self.assertEqual(
+            entries[0]["version"],
+            manifest["version"],
+            "plugin.json and the marketplace entry disagree on the "
+            "version; plugin.json wins at install time and the "
+            "marketplace entry is silently ignored",
+        )
 
     def test_the_check_runs_from_an_installed_bundle(self):
         """The gate has to work where the product runs, not only in the repo.
@@ -3066,28 +3431,50 @@ class PreflightTests(unittest.TestCase):
         # anyway, so this is also the truer shape of the test.
         bundle = self.workspace / "installed"
         shutil.copytree(ROOT / "dist/claude-code", bundle)
-        for script, expected in (("validate_roles.py", "capability gate passed"),
-                                 ("validate_interfaces.py", "interfaces sound")):
+        for script, expected in (
+            ("validate_roles.py", "capability gate passed"),
+            ("validate_interfaces.py", "interfaces sound"),
+        ):
             with self.subTest(script=script):
                 result = subprocess.run(
                     [sys.executable, str(bundle / "scripts" / script)],
-                    capture_output=True, text=True, cwd=str(bundle))
-                self.assertEqual(result.returncode, 0,
-                                 result.stdout + result.stderr)
+                    capture_output=True,
+                    text=True,
+                    cwd=str(bundle),
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn(expected, result.stdout)
 
         result = subprocess.run(
-            [sys.executable, str(bundle / "scripts/root_preflight.py"),
-             "--workspace", self.ws, "--run-id", self.RUN,
-             "--observed", self.observe()],
-            capture_output=True, text=True, cwd=str(bundle))
+            [
+                sys.executable,
+                str(bundle / "scripts/root_preflight.py"),
+                "--workspace",
+                self.ws,
+                "--run-id",
+                self.RUN,
+                "--observed",
+                self.observe(),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(bundle),
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("the boundary holds", result.stdout)
 
     def test_the_cli_refuses_to_invent_an_observation(self):
         result = subprocess.run(
-            [sys.executable, str(ROOT / "scripts/root_preflight.py"),
-             "--workspace", self.ws, "--run-id", self.RUN],
-            capture_output=True, text=True)
+            [
+                sys.executable,
+                str(ROOT / "scripts/root_preflight.py"),
+                "--workspace",
+                self.ws,
+                "--run-id",
+                self.RUN,
+            ],
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(result.returncode, 2)
         self.assertIn("it cannot make one", result.stderr)

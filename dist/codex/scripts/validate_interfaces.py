@@ -22,6 +22,7 @@ all. Absence from a corpus is not absence from an interface.
     validate_interfaces.py                 # every host with an interface
     validate_interfaces.py --host cursor   # one host
 """
+
 import argparse
 import json
 import sys
@@ -95,12 +96,14 @@ def check_provenance_shape(path, document, problems):
                 if prov.get(key):
                     problems.append(
                         "%s is unsourced but carries %s - if there is evidence, "
-                        "the level is wrong; if there is not, remove it" % (where, key))
+                        "the level is wrong; if there is not, remove it" % (where, key)
+                    )
             if not prov.get("caveat"):
                 problems.append(
                     "%s is unsourced and gives no caveat - an unsourced claim must "
                     "say what was looked for and not found, or the next reader "
-                    "cannot tell it from one nobody checked" % where)
+                    "cannot tell it from one nobody checked" % where
+                )
             continue
 
         if not prov.get("source"):
@@ -108,15 +111,18 @@ def check_provenance_shape(path, document, problems):
         if level in QUOTE_REQUIRED and not prov.get("quote"):
             problems.append(
                 "%s is %s but carries no verbatim quote - a paraphrase is where "
-                "inference re-enters" % (where, level))
+                "inference re-enters" % (where, level)
+            )
         if level == "corpus-derived" and not prov.get("sample_size"):
             problems.append(
                 "%s is corpus-derived but gives no sample_size - a claim from an "
-                "unstated number of files cannot be weighed" % where)
+                "unstated number of files cannot be weighed" % where
+            )
 
 
 def strength_of(prov):
-    return STRENGTH.get((prov or {}).get("level"), 0)
+    level = (prov or {}).get("level")
+    return STRENGTH.get(level, 0) if isinstance(level, str) else 0
 
 
 def role_needs(role):
@@ -147,10 +153,10 @@ def role_needs(role):
         if render_agents.is_dispatched(role):
             needs["nested_delegation"] = (
                 "the role is granted delegate and is itself dispatched - so it "
-                "would be a spawned agent spawning")
+                "would be a spawned agent spawning"
+            )
     if "delegate" in deny or "spawn-agents" in must_not:
-        needs["withhold_delegation"] = (
-            "the role denies delegate or declares must_not spawn-agents")
+        needs["withhold_delegation"] = "the role denies delegate or declares must_not spawn-agents"
     return needs
 
 
@@ -179,8 +185,8 @@ def check_role_against_host(role_file, role, path, document, problems):
         if artifact is not None and artifact.exists():
             problems.append(
                 "%s: %s exists although the role is not built for this host "
-                "(%s) - a leftover artifact reads as current"
-                % (where, artifact, reason))
+                "(%s) - a leftover artifact reads as current" % (where, artifact, reason)
+            )
         return
 
     if "nested_delegation" in needs:
@@ -189,19 +195,24 @@ def check_role_against_host(role_file, role, path, document, problems):
             problems.append(
                 "%s: %s, and an agent file IS generated here, but nested "
                 "delegation is UNSOURCED on this host - a shipped artifact may "
-                "not rest on an assumption" % (where, needs["nested_delegation"]))
+                "not rest on an assumption" % (where, needs["nested_delegation"])
+            )
         elif not nested.get("supported"):
-            problems.append("%s: %s, but this host cannot nest delegation"
-                            % (where, needs["nested_delegation"]))
+            problems.append(
+                "%s: %s, but this host cannot nest delegation" % (where, needs["nested_delegation"])
+            )
 
     if "delegation" in needs:
         delegation = document.get("delegation", {})
         if not delegation.get("supported"):
-            problems.append("%s: %s, but this host does not support delegation"
-                            % (where, needs["delegation"]))
+            problems.append(
+                "%s: %s, but this host does not support delegation" % (where, needs["delegation"])
+            )
         elif strength_of(delegation.get("provenance")) == 0:
-            problems.append("%s: %s, but this host's delegation support is unsourced"
-                            % (where, needs["delegation"]))
+            problems.append(
+                "%s: %s, but this host's delegation support is unsourced"
+                % (where, needs["delegation"])
+            )
 
     # A role that withholds delegation on a host with no tool allowlist is NOT
     # an error: render_agents already emits a disclosure saying the grant is an
@@ -256,8 +267,10 @@ def check_manifest_agreement(document, problems):
     if not manifest_path.is_file():
         # An interface may legitimately land before its host manifest does;
         # that is a gap to report, not a contradiction to fail on.
-        print("  note: %s has an interface but no hosts/%s.json yet - nothing "
-              "renders for this host" % (host, host))
+        print(
+            "  note: %s has an interface but no hosts/%s.json yet - nothing "
+            "renders for this host" % (host, host)
+        )
         return
 
     manifest = json.loads(manifest_path.read_text())
@@ -269,8 +282,8 @@ def check_manifest_agreement(document, problems):
                 "%s: hosts/%s.json speaks about %s but the interface records no "
                 "field for it under any of %s - record it with supported:false "
                 "and a provenance rather than omitting it, so absence is not "
-                "mistaken for nobody having looked"
-                % (host, host, concept, "/".join(aliases)))
+                "mistaken for nobody having looked" % (host, host, concept, "/".join(aliases))
+            )
             continue
         if concept not in caps:
             continue
@@ -279,12 +292,15 @@ def check_manifest_agreement(document, problems):
                 "%s: hosts/%s.json says %s supported=%s but the interface says "
                 "%s - the renderer trusts the manifest, so this drift decides "
                 "whether a generated agent claims a guarantee the host will not "
-                "keep" % (host, host, concept, caps[concept]["supported"], declared))
+                "keep" % (host, host, concept, caps[concept]["supported"], declared)
+            )
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", help="check one host instead of every one")
+    parser.add_argument(
+        "--host", "--adapter", dest="host", help="check one host instead of every one"
+    )
     args = parser.parse_args(argv)
 
     paths = interface_paths(args.host)
@@ -318,13 +334,16 @@ def main(argv=None):
     if problems:
         for problem in problems:
             print("  %s" % problem, file=sys.stderr)
-        print("\n%d problem(s) across %d interface(s)"
-              % (len(problems), len(paths)), file=sys.stderr)
+        print(
+            "\n%d problem(s) across %d interface(s)" % (len(problems), len(paths)), file=sys.stderr
+        )
         return 1
 
-    print("interfaces sound: %d host(s), %d role(s) checked against each"
-          % (len(documents), len(roles)))
-    for path, document in documents:
+    print(
+        "interfaces sound: %d host(s), %d role(s) checked against each"
+        % (len(documents), len(roles))
+    )
+    for _path, document in documents:
         nested = document.get("delegation", {}).get("nested", {})
         level = (nested.get("provenance") or {}).get("level", "?")
         state = {True: "yes", False: "no", None: "unknown"}[nested.get("supported")]

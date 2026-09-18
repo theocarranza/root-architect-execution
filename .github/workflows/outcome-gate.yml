@@ -22,11 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.11 is the floor because tomllib lands there, and README.md treats a
-        # tomllib-less interpreter as the degraded path: the TOML assertions
-        # skip rather than fail, so a generated Codex manifest no parser would
-        # accept could ship green. Every version here parses the TOML for real.
-        python-version: ["3.11", "3.12", "3.13"]
+        # 3.12 is the floor: tomllib is in standard library, Path.resolve loop
+        # handling is modern, and type/f-string semantics are stable.
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
@@ -46,6 +44,12 @@ jobs:
             exit 1
           fi
 
+      - name: Install linter and formatter
+        run: pip install ruff
+
+      - name: Code quality and formatting
+        run: python3 tools/lint.py --check
+
       - name: Capability gate
         run: python3 scripts/validate_roles.py
 
@@ -57,6 +61,7 @@ jobs:
           python3 scripts/render_agents.py --host claude-code --check
           python3 scripts/render_agents.py --host codex --check
           python3 scripts/render_agents.py --host cursor --check
+          python3 scripts/render_agents.py --host gemini --check
 
       # The bundle gate, not just the agent files. A rebuild into a temp
       # directory and a byte comparison, because a hash manifest cannot tell a
@@ -65,6 +70,7 @@ jobs:
         run: |
           python3 scripts/build_adapter.py --host claude-code --check
           python3 scripts/build_adapter.py --host codex --check
+          python3 scripts/build_adapter.py --host gemini --check
 
       # What each host actually offers, and whether every role depends only
       # on capabilities that host declares AND sources. An unsourced claim

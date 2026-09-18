@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Pre-push hook for root-architect-execution.
+# Runs the complete outcome gate and automated unit test suite before pushing to remote.
+set -eo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+echo "==> Running pre-push outcome gate..."
+
+# 1. Resolve Python interpreter
+if [ -x "$REPO_ROOT/.venv/bin/python" ]; then
+    PYTHON="$REPO_ROOT/.venv/bin/python"
+elif command -v python3.12 >/dev/null 2>&1; then
+    PYTHON="python3.12"
+elif command -v python3.14 >/dev/null 2>&1; then
+    PYTHON="python3.14"
+else
+    PYTHON="python3"
+fi
+
+# 2. Run pre-commit checks first
+if [ -x "$REPO_ROOT/tools/hooks/pre-commit" ]; then
+    "$REPO_ROOT/tools/hooks/pre-commit"
+fi
+
+# 3. Run full unit test suite
+echo "--> Running automated unit tests..."
+if ! "$PYTHON" -m unittest discover -s "$REPO_ROOT/tests" -t "$REPO_ROOT"; then
+    echo "ERROR: Unit test suite failed. Aborting push." >&2
+    exit 1
+fi
+
+# 4. Smoke installation check
+echo "--> Running smoke installation validation..."
+if ! "$PYTHON" "$REPO_ROOT/scripts/smoke_install.py" --host claude-code; then
+    echo "ERROR: Smoke installation failed. Aborting push." >&2
+    exit 1
+fi
+
+echo "==> Pre-push outcome gate passed! Push allowed."

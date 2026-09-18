@@ -15,22 +15,25 @@ Tests are layered because no single check proves the artifact that users actuall
 
 ```sh
 python3 -m unittest discover -s tests -t .
+python3 tools/lint.py --check
 python3 scripts/render_agents.py --host claude-code --check
 python3 scripts/render_agents.py --host codex --check
+python3 scripts/render_agents.py --host gemini --check
 python3 scripts/build_adapter.py --host claude-code --check
 python3 scripts/build_adapter.py --host codex --check
+python3 scripts/build_adapter.py --host gemini --check
 python3 scripts/validate_interfaces.py
 python3 scripts/validate_roles.py
 python3 scripts/smoke_install.py --host claude-code
 claude plugin validate dist/claude-code
-python3.11 -m unittest discover -s tests -t .
+python3.12 -m unittest discover -s tests -t .
 ```
 
-The README describes these as the repository's ten-command contributor outcome gate.
+The README describes these as the repository's contributor outcome gate.
 
 ## CI
 
-`.github/workflows/outcome-gate.yml` runs on pushes to `master` and pull requests. The suite matrix covers Python 3.11, 3.12, and 3.13 so TOML assertions use `tomllib` rather than silently skipping.
+`.github/workflows/outcome-gate.yml` runs on pushes to `master` and pull requests. The suite matrix covers Python 3.12, 3.13, and 3.14 so TOML assertions use standard library `tomllib` rather than silently skipping.
 
 CI refuses to run the permission-sensitive suite as root because root can bypass `chmod 000`, which would make fail-closed state tests skip while the suite still reported success.
 

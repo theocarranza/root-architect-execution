@@ -23,6 +23,7 @@ files, and differing content separately -- each is a different kind of mistake.
     build_adapter.py --host claude-code
     build_adapter.py --host claude-code --check
 """
+
 import argparse
 import filecmp
 import fnmatch
@@ -67,8 +68,8 @@ def load_layout(host):
         raise BuildError("%s is not valid JSON: %s" % (shown(path), e))
     if layout.get("host") != host:
         raise BuildError(
-            "%s declares host %r but is filed under %r"
-            % (shown(path), layout.get("host"), host))
+            "%s declares host %r but is filed under %r" % (shown(path), layout.get("host"), host)
+        )
     if not layout.get("place"):
         raise BuildError("%s places nothing" % shown(path))
     return layout
@@ -87,7 +88,8 @@ def resolve_source(host, source):
             return candidate
     raise BuildError(
         "layout names a source that exists in neither adapters/%s/ nor the "
-        "repository root: %s" % (host, source))
+        "repository root: %s" % (host, source)
+    )
 
 
 def excluded(relative, patterns):
@@ -111,27 +113,26 @@ def build(host, out_dir):
         if source.endswith("/") != destination.endswith("/"):
             raise BuildError(
                 "layout entry %r -> %r mixes a directory with a file; a "
-                "trailing slash must appear on both sides or neither"
-                % (source, destination))
-        if source.endswith("/"):
+                "trailing slash must appear on both sides or neither" % (source, destination)
+            )
+        is_dir = source.endswith("/")
+        if is_dir:
             if not origin.is_dir():
                 raise BuildError("%s is not a directory" % shown(origin))
-            for item in sorted(origin.rglob("*")):
-                if not item.is_file():
-                    continue
-                relative = item.relative_to(origin)
-                if excluded(relative, patterns):
-                    continue
-                landing = target / relative
-                landing.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(item, landing)
-                written.append(landing.relative_to(out_dir))
+            items = origin.rglob("*")
         else:
             if not origin.is_file():
                 raise BuildError("%s is not a file" % shown(origin))
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(origin, target)
-            written.append(target.relative_to(out_dir))
+            items = [origin]
+
+        for item in sorted(p for p in items if p.is_file()):
+            relative = item.relative_to(origin) if is_dir else Path()
+            if is_dir and excluded(relative, patterns):
+                continue
+            landing = target / relative
+            landing.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, landing)
+            written.append(landing.relative_to(out_dir))
     return sorted(written)
 
 
@@ -151,8 +152,10 @@ def compare(built_dir, committed_dir):
     missing = sorted(built - committed)
     extra = sorted(committed - built)
     differing = sorted(
-        p for p in (built & committed)
-        if not filecmp.cmp(Path(built_dir) / p, Path(committed_dir) / p, shallow=False))
+        p
+        for p in (built & committed)
+        if not filecmp.cmp(Path(built_dir) / p, Path(committed_dir) / p, shallow=False)
+    )
     return missing, extra, differing
 
 
@@ -166,8 +169,10 @@ def cmd_check(host):
         build(host, fresh)
         missing, extra, differing = compare(fresh, committed)
     if not (missing or extra or differing):
-        print("in sync: dist/%s matches a fresh build from adapters/%s and the "
-              "repository core (%d files)" % (host, host, len(tree(committed))))
+        print(
+            "in sync: dist/%s matches a fresh build from adapters/%s and the "
+            "repository core (%d files)" % (host, host, len(tree(committed)))
+        )
         return 0
     print("dist/%s does NOT match a fresh build:" % host, file=sys.stderr)
     for path in missing:
@@ -176,21 +181,22 @@ def cmd_check(host):
         print("  present in dist/ but not built: %s" % path.as_posix(), file=sys.stderr)
     for path in differing:
         print("  content differs: %s" % path.as_posix(), file=sys.stderr)
-    print("\nRebuild with: python3 scripts/build_adapter.py --host %s" % host,
-          file=sys.stderr)
+    print("\nRebuild with: python3 scripts/build_adapter.py --host %s" % host, file=sys.stderr)
     return 1
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--host", required=True)
     parser.add_argument("--out", help="defaults to dist/<host>")
     parser.add_argument(
-        "--check", action="store_true",
+        "--check",
+        action="store_true",
         help="rebuild into a temporary directory and fail if the committed "
-             "bundle differs, instead of writing")
+        "bundle differs, instead of writing",
+    )
     args = parser.parse_args(argv)
 
     try:

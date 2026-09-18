@@ -16,6 +16,7 @@ scattering of flags.
 a time, and two open dispatches would leave the write guard unable to say whose
 paths it is protecting.
 """
+
 import argparse
 import json
 import os
@@ -68,10 +69,12 @@ def _dispatch_files(directory):
     try:
         names = os.listdir(directory)
     except OSError as e:
-        raise DispatchStateError(
-            directory, ["state directory cannot be listed: %s" % e])
-    return sorted(directory / name for name in names
-                  if name.startswith("dispatch-") and name.endswith(".json"))
+        raise DispatchStateError(directory, ["state directory cannot be listed: %s" % e])
+    return sorted(
+        directory / name
+        for name in names
+        if name.startswith("dispatch-") and name.endswith(".json")
+    )
 
 
 def _validate_dispatch(data, schema_path):
@@ -92,8 +95,7 @@ def _validate_dispatch(data, schema_path):
     except FileNotFoundError as e:
         raise DispatchStateError(schema_path, ["schema file not found: %s" % e])
     except (OSError, ValueError) as e:
-        raise DispatchStateError(
-            schema_path, ["schema file is not valid JSON: %s" % e])
+        raise DispatchStateError(schema_path, ["schema file is not valid JSON: %s" % e])
     except SchemaError as e:
         raise DispatchStateError(e.path or schema_path, [str(e)])
 
@@ -143,9 +145,8 @@ def active_dispatch(workspace):
             # Rule (a): parsed but not an object -> raise, same reasoning as
             # unparseable JSON since there is no readable `status` field.
             raise DispatchStateError(
-                candidate,
-                ["JSON parsed but is not an object (got %s)"
-                 % type(data).__name__])
+                candidate, ["JSON parsed but is not an object (got %s)" % type(data).__name__]
+            )
 
         status = data.get("status")
         if status in ("closed", "aborted"):
@@ -178,8 +179,7 @@ def cmd_open(args):
         return _fail("cannot read brief %s: %s" % (args.brief, e))
 
     if not isinstance(brief, dict):
-        return _fail("brief %s is not a JSON object (got %s)"
-                     % (args.brief, type(brief).__name__))
+        return _fail("brief %s is not a JSON object (got %s)" % (args.brief, type(brief).__name__))
 
     try:
         errors = _validate_dispatch(brief, SCHEMAS / "brief.schema.json")
@@ -222,8 +222,10 @@ def cmd_open(args):
     target = directory / ("dispatch-%s.json" % args.run_id)
     target.write_text(json.dumps(dispatch, indent=2) + "\n", encoding="utf-8")
     print("open %s" % target)
-    print("root write guard now protects: %s"
-          % (", ".join(brief["write_paths"]) or "(no write paths)"))
+    print(
+        "root write guard now protects: %s"
+        % (", ".join(brief["write_paths"]) or "(no write paths)")
+    )
     return 0
 
 
@@ -258,8 +260,7 @@ def cmd_close(args):
         return _fail("close would produce an invalid dispatch: %s" % e)
 
     if errors:
-        return _fail("close would produce an invalid dispatch:\n  "
-                     + "\n  ".join(errors))
+        return _fail("close would produce an invalid dispatch:\n  " + "\n  ".join(errors))
     target.write_text(json.dumps(dispatch, indent=2) + "\n", encoding="utf-8")
     print("%s %s (%s)" % (dispatch["status"], args.run_id, args.outcome))
     return 0
@@ -357,8 +358,10 @@ def main(argv=None):
     p_close.add_argument("--workspace", default=".")
     p_close.add_argument("--run-id", required=True)
     p_close.add_argument(
-        "--outcome", required=True,
-        choices=["accepted", "findings-returned", "blocked", "attempts-exhausted"])
+        "--outcome",
+        required=True,
+        choices=["accepted", "findings-returned", "blocked", "attempts-exhausted"],
+    )
     p_close.set_defaults(func=cmd_close)
 
     p_active = sub.add_parser("active", help="show the open dispatch, if any")

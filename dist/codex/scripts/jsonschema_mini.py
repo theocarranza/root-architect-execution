@@ -15,6 +15,7 @@ keep the schemas inside this subset.
 Targets Python 3.9+ so the PreToolUse hooks can run under whichever interpreter
 `python3` happens to be.
 """
+
 import json
 import re
 from pathlib import Path
@@ -79,14 +80,14 @@ class Validator:
                 text = target.read_text(encoding="utf-8")
             except OSError as e:
                 raise SchemaError(
-                    "sibling schema file not found: %s: %s" % (target, e),
-                    path=target)
+                    "sibling schema file not found: %s: %s" % (target, e), path=target
+                )
             try:
                 self._siblings[ref] = json.loads(text)
             except ValueError as e:
                 raise SchemaError(
-                    "sibling schema file %s is not valid JSON: %s" % (target, e),
-                    path=target)
+                    "sibling schema file %s is not valid JSON: %s" % (target, e), path=target
+                )
         sibling = self._siblings[ref]
         return sibling, sibling
 
@@ -127,8 +128,9 @@ class Validator:
             if isinstance(names, str):
                 names = [names]
             if not any(_is_type(value, n) for n in names):
-                errors.append("%s: expected type %s, got %s"
-                              % (path, "/".join(names), type(value).__name__))
+                errors.append(
+                    "%s: expected type %s, got %s" % (path, "/".join(names), type(value).__name__)
+                )
                 return
 
         if "const" in schema and value != schema["const"]:
@@ -139,11 +141,9 @@ class Validator:
 
         if isinstance(value, str):
             if "minLength" in schema and len(value) < schema["minLength"]:
-                errors.append("%s: shorter than minLength %d"
-                              % (path, schema["minLength"]))
+                errors.append("%s: shorter than minLength %d" % (path, schema["minLength"]))
             if "pattern" in schema and not re.search(schema["pattern"], value):
-                errors.append("%s: %r does not match pattern %s"
-                              % (path, value, schema["pattern"]))
+                errors.append("%s: %r does not match pattern %s" % (path, value, schema["pattern"]))
 
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             if "minimum" in schema and value < schema["minimum"]:
@@ -153,14 +153,12 @@ class Validator:
 
         if isinstance(value, list):
             if "minItems" in schema and len(value) < schema["minItems"]:
-                errors.append("%s: fewer than minItems %d"
-                              % (path, schema["minItems"]))
+                errors.append("%s: fewer than minItems %d" % (path, schema["minItems"]))
             if schema.get("uniqueItems") and len(value) != len(set(map(repr, value))):
                 errors.append("%s: contains duplicate entries" % path)
             if "items" in schema:
                 for i, item in enumerate(value):
-                    self._check(item, schema["items"], local_root,
-                                "%s[%d]" % (path, i), errors)
+                    self._check(item, schema["items"], local_root, "%s[%d]" % (path, i), errors)
 
         if isinstance(value, dict):
             props = schema.get("properties", {})

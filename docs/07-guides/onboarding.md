@@ -25,9 +25,10 @@ git status
 python3 scripts/validate_roles.py
 python3 scripts/validate_interfaces.py
 python3 -m unittest discover -s tests -t .
+python3 tools/install_hooks.py
 ```
 
-Use Python 3.11+ at least once so Codex TOML is parsed by the standard library.
+Use Python 3.12+ at least once so Codex TOML is parsed by the standard library. Running `python3 tools/install_hooks.py` activates automated pre-commit and pre-push quality gates.
 
 ## Golden rule for edits
 

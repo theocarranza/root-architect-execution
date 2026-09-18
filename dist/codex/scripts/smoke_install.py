@@ -27,6 +27,7 @@ own test suite's job.
 
     smoke_install.py --host claude-code
 """
+
 import argparse
 import json
 import os
@@ -56,19 +57,16 @@ def expectations(host):
     if not roles:
         raise SmokeError("no roles found; nothing to expect")
     adapter = ROOT / "adapters" / host
-    manifest = json.loads(
-        (adapter / "manifest.template.json").read_text(encoding="utf-8"))
+    manifest = json.loads((adapter / "manifest.template.json").read_text(encoding="utf-8"))
     # hooks.json nests the events under a "hooks" key. Reading the top level
     # yielded the literal string "hooks", which then matched the report's own
     # "Hooks (1)" heading -- an assertion that passed no matter what shipped.
     # That is the vacuous-coverage failure this repository has rejected before,
     # so the event names are read from where they actually live.
-    document = json.loads(
-        (adapter / "hooks/hooks.json").read_text(encoding="utf-8"))
+    document = json.loads((adapter / "hooks/hooks.json").read_text(encoding="utf-8"))
     events = sorted(document.get("hooks", {}))
     if not events:
-        raise SmokeError("adapters/%s/hooks/hooks.json declares no events to "
-                         "look for" % host)
+        raise SmokeError("adapters/%s/hooks/hooks.json declares no events to look for" % host)
     return {
         "plugin": manifest["name"],
         "version": manifest["version"],
@@ -93,7 +91,8 @@ def hook_targets(bundle):
         raise SmokeError(
             "the bundle ships no hooks/hooks.json, so it registers no guards "
             "at all. This plugin's entire enforcement story is those two "
-            "PreToolUse hooks.")
+            "PreToolUse hooks."
+        )
     try:
         document = json.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
@@ -102,8 +101,9 @@ def hook_targets(bundle):
     for entries in document.get("hooks", {}).values():
         for entry in entries:
             for hook in entry.get("hooks", []):
-                for raw in re.findall(r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\"\']+)",
-                                      hook.get("command", "")):
+                for raw in re.findall(
+                    r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\"\']+)", hook.get("command", "")
+                ):
                     if not (bundle / raw).is_file():
                         missing.append(raw)
     return sorted(set(missing))
@@ -119,27 +119,27 @@ def component_inventory(report):
     that deleted hooks.json passed. Narrowing the haystack is what makes the
     assertion mean what it says.
     """
-    match = re.search(r"^Component inventory$(.*?)^\s*$", report,
-                      re.M | re.S)
+    match = re.search(r"^Component inventory$(.*?)^\s*$", report, re.M | re.S)
     if not match:
         raise SmokeError(
             "the host's output has no component inventory to check; its "
             "format may have changed, and this gate must not pass on a "
-            "report it cannot read:\n\n%s" % report.strip())
+            "report it cannot read:\n\n%s" % report.strip()
+        )
     return match.group(1)
 
 
 def run(args, home, timeout=180):
     environment = dict(os.environ, HOME=str(home))
-    return subprocess.run(args, capture_output=True, text=True,
-                          env=environment, cwd=str(home), timeout=timeout)
+    return subprocess.run(
+        args, capture_output=True, text=True, env=environment, cwd=str(home), timeout=timeout
+    )
 
 
 def smoke(host, bundle=None):
     bundle = Path(bundle) if bundle else DIST / host
     if not bundle.is_dir():
-        raise SmokeError("no bundle at %s; run build_adapter.py --host %s first"
-                         % (bundle, host))
+        raise SmokeError("no bundle at %s; run build_adapter.py --host %s first" % (bundle, host))
     if shutil.which("claude") is None:
         return None  # caller decides whether an absent CLI is fatal
 
@@ -150,7 +150,8 @@ def smoke(host, bundle=None):
         raise SmokeError(
             "hooks.json points at scripts the bundle does not ship: %s. The "
             "host would register the hook and the guard would fail the first "
-            "time it fired." % ", ".join(unreachable))
+            "time it fired." % ", ".join(unreachable)
+        )
 
     with tempfile.TemporaryDirectory() as scratch:
         home = Path(scratch) / "home"
@@ -158,56 +159,64 @@ def smoke(host, bundle=None):
 
         added = run(["claude", "plugin", "marketplace", "add", str(bundle)], home)
         if added.returncode != 0:
-            raise SmokeError("the host refused the bundle as a marketplace:\n%s"
-                             % (added.stdout + added.stderr).strip())
+            raise SmokeError(
+                "the host refused the bundle as a marketplace:\n%s"
+                % (added.stdout + added.stderr).strip()
+            )
 
         target = "%s@%s" % (want["plugin"], want["plugin"])
         installed = run(["claude", "plugin", "install", target], home)
         if installed.returncode != 0:
-            raise SmokeError("the host refused to install the bundle:\n%s"
-                             % (installed.stdout + installed.stderr).strip())
+            raise SmokeError(
+                "the host refused to install the bundle:\n%s"
+                % (installed.stdout + installed.stderr).strip()
+            )
 
         listed = run(["claude", "plugin", "details", want["plugin"]], home)
         if listed.returncode != 0:
-            raise SmokeError("the host installed the bundle but cannot describe "
-                             "it:\n%s" % (listed.stdout + listed.stderr).strip())
+            raise SmokeError(
+                "the host installed the bundle but cannot describe "
+                "it:\n%s" % (listed.stdout + listed.stderr).strip()
+            )
         report = listed.stdout
 
     inventory = component_inventory(report)
 
-    missing = [name for name in want["agents"]
-               if not re.search(r"\b%s\b" % re.escape(name), inventory)]
+    missing = [
+        name for name in want["agents"] if not re.search(r"\b%s\b" % re.escape(name), inventory)
+    ]
     if missing:
         raise SmokeError(
             "installed, but the host did not report these agents: %s\n\n%s"
-            % (", ".join(missing), report.strip()))
+            % (", ".join(missing), report.strip())
+        )
 
     if not re.search(r"Skills\s*\(\s*[1-9]", inventory):
-        raise SmokeError("installed, but the host reported no skills:\n\n%s"
-                         % report.strip())
+        raise SmokeError("installed, but the host reported no skills:\n\n%s" % report.strip())
 
     for hook in want["hooks"]:
-        if not re.search(r"Hooks\s*\(\s*[1-9][^\n]*\b%s\b" % re.escape(hook),
-                         inventory):
+        if not re.search(r"Hooks\s*\(\s*[1-9][^\n]*\b%s\b" % re.escape(hook), inventory):
             raise SmokeError(
                 "installed, but the host did not register the %s hook. The "
                 "guards are the plugin's only enforcement; a bundle that ships "
-                "without them installs clean and protects nothing.\n\n%s"
-                % (hook, report.strip()))
+                "without them installs clean and protects nothing.\n\n%s" % (hook, report.strip())
+            )
 
     return want, report
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--host", default="claude-code")
     parser.add_argument("--bundle", help="defaults to dist/<host>")
     parser.add_argument(
-        "--require-cli", action="store_true",
+        "--require-cli",
+        action="store_true",
         help="fail instead of skipping when the claude CLI is absent; CI sets "
-             "this so a runner without the CLI cannot silently pass the gate")
+        "this so a runner without the CLI cannot silently pass the gate",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -220,9 +229,11 @@ def main(argv=None):
         return 1
 
     if outcome is None:
-        message = ("the claude CLI is not on PATH, so it is unproven that the "
-                   "built bundle installs and that its agents, skill and hooks "
-                   "resolve")
+        message = (
+            "the claude CLI is not on PATH, so it is unproven that the "
+            "built bundle installs and that its agents, skill and hooks "
+            "resolve"
+        )
         if args.require_cli:
             print("smoke install FAILED: %s" % message, file=sys.stderr)
             return 1
@@ -230,9 +241,16 @@ def main(argv=None):
         return 0
 
     want, _report = outcome
-    print("installs clean: %s %s -> %d agents (%s), skill present, hooks %s"
-          % (want["plugin"], want["version"], len(want["agents"]),
-             ", ".join(want["agents"]), ", ".join(want["hooks"])))
+    print(
+        "installs clean: %s %s -> %d agents (%s), skill present, hooks %s"
+        % (
+            want["plugin"],
+            want["version"],
+            len(want["agents"]),
+            ", ".join(want["agents"]),
+            ", ".join(want["hooks"]),
+        )
+    )
     return 0
 
 

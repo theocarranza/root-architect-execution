@@ -33,6 +33,7 @@ Four rules this enforces rather than requests:
     check a gate rather than advice: root skipping it does not produce a run
     that merely lacks a record, it produces no run.
 """
+
 import argparse
 import json
 import sys
@@ -92,21 +93,23 @@ def validate(document):
     except SchemaError as exc:
         raise JobQueueError("the job-queue schema itself will not load: %s" % exc)
     if problems:
-        raise JobQueueError("queue is not schema-conformant: %s"
-                            % "; ".join(str(p) for p in problems))
+        raise JobQueueError(
+            "queue is not schema-conformant: %s" % "; ".join(str(p) for p in problems)
+        )
 
     seen = set()
     for task in document["tasks"]:
         if task["name"] in seen:
             raise JobQueueError(
                 "task %r appears twice; names index envelopes and log lines, so "
-                "a duplicate makes the record ambiguous" % task["name"])
+                "a duplicate makes the record ambiguous" % task["name"]
+            )
         seen.add(task["name"])
         if task["state"] in TERMINAL and not task.get("envelope"):
             raise JobQueueError(
                 "task %r is %s but names no envelope - an answered task with "
-                "nothing to point at is a claim, not a record"
-                % (task["name"], task["state"]))
+                "nothing to point at is a claim, not a record" % (task["name"], task["state"])
+            )
 
 
 def save(workspace, run_id, document):
@@ -123,14 +126,15 @@ def init(workspace, run_id, tasks):
         raise JobQueueError(
             "refusing to queue run %s: %s\n\nThe queue is where a run begins, "
             "so it is where the startup check has to bite. Orchestrating "
-            "without it would record an isolation nothing was holding."
-            % (run_id, why))
+            "without it would record an isolation nothing was holding." % (run_id, why)
+        )
 
     path = queue_path(workspace, run_id)
     if path.exists():
         raise JobQueueError(
             "%s already exists. A run's queue is created once: re-initialising "
-            "would discard whatever the earlier one recorded." % path)
+            "would discard whatever the earlier one recorded." % path
+        )
     document = {
         "schema_version": 1,
         "run_id": run_id,
@@ -159,8 +163,8 @@ def next_task(document):
         raise JobQueueError(
             "task %r is still dispatched. Mark it returned or failed before "
             "dispatching another: the write guard reads one open dispatch, and "
-            "two would leave it unable to say whose paths it protects."
-            % out[0]["name"])
+            "two would leave it unable to say whose paths it protects." % out[0]["name"]
+        )
     for task in document["tasks"]:
         if task["state"] == "pending":
             return task
@@ -178,15 +182,15 @@ def mark(workspace, run_id, name, state, envelope=None):
         raise JobQueueError(
             "task %r cannot go from %s to %s. Transitions are monotonic - a "
             "queue that can move a task backwards can revise its own history."
-            % (name, current, state))
+            % (name, current, state)
+        )
     if state in TERMINAL and not envelope:
         # validate() refuses this too, on save, so nothing inconsistent can be
         # written either way. This check exists for the message: the caller is
         # mid-operation and wants to know what to supply, not which invariant
         # the finished document breaks. Both are kept deliberately; the test
         # asserts THIS wording so the distinction stays load-bearing.
-        raise JobQueueError(
-            "marking %r as %s needs the envelope that answered it" % (name, state))
+        raise JobQueueError("marking %r as %s needs the envelope that answered it" % (name, state))
 
     task["state"] = state
     task["updated_at"] = _now()
@@ -205,8 +209,7 @@ def verify(workspace, run_id):
         return [str(exc)]
 
     try:
-        envelopes = {p.name for p in mailbox.envelope_paths(
-            mailbox.mailbox_dir(workspace, run_id))}
+        envelopes = {p.name for p in mailbox.envelope_paths(mailbox.mailbox_dir(workspace, run_id))}
     except Exception as exc:  # pragma: no cover - defensive
         return ["cannot read the mailbox for run %s: %s" % (run_id, exc)]
 
@@ -218,18 +221,21 @@ def verify(workspace, run_id):
                 problems.append(
                     "task %r is %s and names envelope %r, which is not in the "
                     "mailbox. The queue records work the record of the work "
-                    "does not contain." % (name, state, envelope))
+                    "does not contain." % (name, state, envelope)
+                )
         elif envelope:
             problems.append(
                 "task %r is %s but already names an envelope - an unanswered "
                 "task pointing at an answer is a bookkeeping error that would "
-                "read as progress" % (name, state))
+                "read as progress" % (name, state)
+            )
 
     dispatched = [t["name"] for t in document["tasks"] if t["state"] == "dispatched"]
     if len(dispatched) > 1:
         problems.append(
             "%d tasks are dispatched at once (%s); the loop runs one at a time"
-            % (len(dispatched), ", ".join(dispatched)))
+            % (len(dispatched), ", ".join(dispatched))
+        )
 
     return problems
 
@@ -281,9 +287,10 @@ def cmd_status(args):
     except JobQueueError as exc:
         return _fail(str(exc))
     for task in document["tasks"]:
-        print("%-10s %-24s %-18s %s"
-              % (task["state"], task["name"], task["worker"],
-                 task.get("envelope", "")))
+        print(
+            "%-10s %-24s %-18s %s"
+            % (task["state"], task["name"], task["worker"], task.get("envelope", ""))
+        )
     return 0
 
 
@@ -292,8 +299,7 @@ def cmd_verify(args):
     if problems:
         for problem in problems:
             print("  %s" % problem, file=sys.stderr)
-        print("\n%d problem(s) in run %s" % (len(problems), args.run_id),
-              file=sys.stderr)
+        print("\n%d problem(s) in run %s" % (len(problems), args.run_id), file=sys.stderr)
         return 1
     print("run %s: the queue and the mailbox agree" % args.run_id)
     return 0
@@ -316,8 +322,7 @@ def main(argv=None):
     mark_p = sub.add_parser("mark")
     mark_p.add_argument("--run-id", required=True)
     mark_p.add_argument("--task", required=True)
-    mark_p.add_argument("--state", required=True,
-                        choices=["dispatched", "returned", "failed"])
+    mark_p.add_argument("--state", required=True, choices=["dispatched", "returned", "failed"])
     mark_p.add_argument("--envelope")
     mark_p.set_defaults(func=cmd_mark)
 

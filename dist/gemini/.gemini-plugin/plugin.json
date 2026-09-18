@@ -1,0 +1,9 @@
+{
+  "name": "root-architect-execution",
+  "version": "0.1.1",
+  "description": "Root-architect execution protocol with generated Gemini worker agents.",
+  "author": {
+    "name": "Theo Carranza",
+    "email": "theocarranza@gmail.com"
+  }
+}

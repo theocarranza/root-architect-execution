@@ -29,6 +29,13 @@ Do not infer a host capability and encode it as guaranteed. Record provenance an
 
 Keep scripts directly executable where intended, deterministic, filesystem-conscious, and explicit about non-zero failure exits. Compatibility must account for TOML parsing: Python 3.11+ has `tomllib`; degraded environments must not silently imply equivalent verification.
 
+## Formatting & Linting
+
+Code formatting, linting, and type checking standards are enforced via Ruff and Basedpyright/Mypy (`pyproject.toml`):
+- Run `python3 tools/lint.py --check` (or `ruff check`, `ruff format --check`, and type checking) to verify compliance.
+- Run `python3 tools/lint.py --fix` (or `ruff check --fix` and `ruff format`) to format code and auto-fix linter issues.
+- `tools/lint.py --fix` automatically rebuilds host distribution bundles (`dist/`) so generated bundles remain byte-for-byte in sync with sources.
+
 ## Git
 
 Workers never commit. Root creates narrow commits after successful task gates, stages only brief-owned paths plus ledger/checkpoint artifacts, and runs `git diff --cached --check`.

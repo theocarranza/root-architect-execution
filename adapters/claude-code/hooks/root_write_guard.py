@@ -28,10 +28,12 @@ because dispatch_state itself could not be imported) is also treated as a
 block: this guard fails closed, never open, whenever it cannot prove no
 delegation is open.
 """
+
 import json
 import os
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 HERE = Path(__file__).resolve().parent
 
@@ -47,8 +49,7 @@ HERE = Path(__file__).resolve().parent
 # worse: this guard fails CLOSED on an import error, so a directory that
 # happens to be named scripts/ would not produce a clean failure, it would
 # produce a guard that blocks every write with a confusing reason.
-for _candidate in (HERE.parent / "scripts",
-                   HERE.parent.parent.parent / "scripts"):
+for _candidate in (HERE.parent / "scripts", HERE.parent.parent.parent / "scripts"):
     if (_candidate / "dispatch_state.py").is_file():
         sys.path.insert(0, str(_candidate))
         break
@@ -69,7 +70,7 @@ def _usable_path(value):
     return value
 
 
-def _allow():
+def _allow() -> NoReturn:
     sys.exit(0)
 
 
@@ -87,7 +88,7 @@ def _report(stream, text):
         pass
 
 
-def _deny(reason):
+def _deny(reason: str) -> NoReturn:
     """Unconditionally terminal: exit 2 whatever the streams do.
 
     Two ways this used to fail open. (1) An OSError from the payload write
@@ -103,13 +104,19 @@ def _deny(reason):
     Both streams are already flushed above, so nothing reportable is lost.
     Only exit 2 blocks a call; 0, 1 and 120 are all fail-open.
     """
-    _report(sys.stdout, json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
-    }) + "\n")
+    _report(
+        sys.stdout,
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+        + "\n",
+    )
     _report(sys.stderr, reason + "\n")
     os._exit(2)
 
@@ -159,7 +166,8 @@ def main():
         _deny(
             "Root write guard: an internal error occurred while checking "
             "this call, so it cannot be verified safe:\n  %r\n"
-            "This guard fails closed on internal errors, never open." % (e,))
+            "This guard fails closed on internal errors, never open." % (e,)
+        )
 
 
 def _main():
@@ -187,10 +195,11 @@ def _main():
     if cwd is None or cwd == "":
         workspace = "."
     else:
-        workspace = _usable_path(cwd)
-        if workspace is None:
+        usable = _usable_path(cwd)
+        if usable is None:
             # cwd is not a path we can build on. Malformed hook input.
             _allow()
+        workspace = usable
 
     try:
         from dispatch_state import active_dispatch, DispatchStateError
@@ -213,20 +222,23 @@ def _main():
                     "  %s\n"
                     "This guard cannot verify whether a dispatch is open, and "
                     "fails closed rather than open. Restore access to the "
-                    "directory, or remove it if the run is over."
-                    % (directory, e))
+                    "directory, or remove it if the run is over." % (directory, e)
+                )
         else:
             names = []
-        found = sorted(directory / name for name in names
-                       if name.startswith("dispatch-") and name.endswith(".json"))
+        found = sorted(
+            directory / name
+            for name in names
+            if name.startswith("dispatch-") and name.endswith(".json")
+        )
         if found:
             _deny(
                 "Root write guard: dispatch_state could not be imported, so "
                 "this guard cannot verify whether a dispatch is open. Found "
                 "state file(s) that may represent an open dispatch: %s.\n"
                 "Restore scripts/dispatch_state.py, or remove the stale "
-                "state file(s) if the run is over."
-                % ", ".join(str(f) for f in found))
+                "state file(s) if the run is over." % ", ".join(str(f) for f in found)
+            )
         _allow()
 
     try:
@@ -238,8 +250,8 @@ def _main():
             "dispatch is open. Inspect and recover:\n"
             "  python3 ${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py verify\n"
             "  cat %s\n"
-            "  rm %s   # once the run is over"
-            % (e.path, "\n  ".join(e.errors), e.path, e.path))
+            "  rm %s   # once the run is over" % (e.path, "\n  ".join(e.errors), e.path, e.path)
+        )
     if not dispatch:
         _allow()
 
@@ -279,8 +291,16 @@ def _main():
                 "first:\n"
                 "  python3 ${CLAUDE_PLUGIN_ROOT}/scripts/dispatch_state.py close "
                 "--run-id %s --outcome blocked"
-                % (raw, dispatch["run_id"], brief["task"], brief["attempt"],
-                   brief["max_attempts"], brief["role"], dispatch["run_id"]))
+                % (
+                    raw,
+                    dispatch["run_id"],
+                    brief["task"],
+                    brief["attempt"],
+                    brief["max_attempts"],
+                    brief["role"],
+                    dispatch["run_id"],
+                )
+            )
     _allow()
 
 

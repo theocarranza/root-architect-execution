@@ -10,6 +10,7 @@ So the generated agent file carries the skeleton itself. Generating it from the
 schema rather than hand-writing it is what keeps the two from drifting: change
 the schema and the next render changes the skeleton.
 """
+
 import json
 
 PLACEHOLDER = {
