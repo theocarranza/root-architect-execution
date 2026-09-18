@@ -17,3 +17,4 @@ __pycache__/
 # clone, while the vault holds why the guards fail closed, what each host
 # actually enforces, and which decisions are already settled — none of which
 # survived a clone while this was ignored.
+.gemini/
