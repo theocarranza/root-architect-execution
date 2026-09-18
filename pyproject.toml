@@ -1,0 +1,50 @@
+[project]
+name = "root-architect-execution"
+version = "0.1.1"
+description = "A contract-driven execution protocol for running implementation plans through a root architect."
+readme = "README.md"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = [
+    ".git",
+    "__pycache__",
+    "dist",
+    ".venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line too long (handled by formatter and schema tables)
+    "UP031", # % format strings
+    "B008",  # do not perform function calls in argument defaults
+    "B904",  # within an except clause, raise exceptions with raise ... from err
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pyright]
+include = ["scripts", "tests", "adapters", "hooks", "tools"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "dist",
+    ".venv",
+]
+extraPaths = [
+    "scripts",
+]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"

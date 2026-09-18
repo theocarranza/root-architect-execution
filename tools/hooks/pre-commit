@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Pre-commit hook for root-architect-execution.
+# Runs code quality, formatting, linter, typing, and drift checks before committing.
+set -eo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+echo "==> Running pre-commit quality gate..."
+
+# 1. Whitespace & conflict markers check on staged changes
+if ! git diff --cached --check; then
+    echo "ERROR: Staged files contain whitespace errors or unresolved merge conflict markers." >&2
+    exit 1
+fi
+
+# 2. Resolve Python interpreter
+if [ -x "$REPO_ROOT/.venv/bin/python" ]; then
+    PYTHON="$REPO_ROOT/.venv/bin/python"
+elif command -v python3.12 >/dev/null 2>&1; then
+    PYTHON="python3.12"
+elif command -v python3.14 >/dev/null 2>&1; then
+    PYTHON="python3.14"
+else
+    PYTHON="python3"
+fi
+
+# 3. Code formatting, linter, and static type checking
+echo "--> Checking code formatting, lint rules, and types..."
+if ! "$PYTHON" "$REPO_ROOT/tools/lint.py" --check; then
+    echo "" >&2
+    echo "ERROR: Code quality or formatting check failed." >&2
+    echo "Run 'python3 tools/lint.py --fix' to auto-format and fix lint issues." >&2
+    exit 1
+fi
+
+# 4. Role schema validation
+echo "--> Validating role schemas and capability declarations..."
+if ! "$PYTHON" "$REPO_ROOT/scripts/validate_roles.py"; then
+    echo "ERROR: validate_roles.py failed." >&2
+    exit 1
+fi
+
+# 5. Host interface provenance checks
+echo "--> Validating host interface contracts..."
+if ! "$PYTHON" "$REPO_ROOT/scripts/validate_interfaces.py"; then
+    echo "ERROR: validate_interfaces.py failed." >&2
+    exit 1
+fi
+
+# 6. Generated agent drift check
+echo "--> Checking generated host agents for drift..."
+for host in claude-code codex cursor gemini; do
+    if ! "$PYTHON" "$REPO_ROOT/scripts/render_agents.py" --host "$host" --check; then
+        echo "ERROR: Generated agents for host '$host' are out of sync. Re-render with: python3 scripts/render_agents.py --host $host" >&2
+        exit 1
+    fi
+done
+
+# 7. Distribution bundle drift check
+echo "--> Checking built distribution bundles for drift..."
+for host in claude-code codex gemini; do
+    if ! "$PYTHON" "$REPO_ROOT/scripts/build_adapter.py" --host "$host" --check; then
+        echo "ERROR: Built bundle dist/$host is out of sync. Rebuild with: python3 scripts/build_adapter.py --host $host" >&2
+        exit 1
+    fi
+done
+
+echo "==> Pre-commit quality gate passed!"
