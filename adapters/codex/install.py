@@ -18,6 +18,7 @@ Each of those three resolutions is written out locally rather than shared. A
 helper would have to live in scripts/, and every one of them exists precisely
 to find scripts/.
 """
+
 import argparse
 import json
 import sys
@@ -33,7 +34,8 @@ else:
         "cannot find the plugin root from %s: looked for scripts/render_agents.py "
         "two levels up and beside this file. Without it the agents cannot be "
         "rendered, and writing nothing is the right outcome - a half-installed "
-        "agent directory is worse than an absent one." % HERE)
+        "agent directory is worse than an absent one." % HERE
+    )
 sys.path.insert(0, str(ROOT / "scripts"))
 import render_agents  # noqa: E402
 
@@ -95,17 +97,22 @@ def materialize(target, plugin_root=ROOT):
             continue
         if candidate.is_file():
             candidate.unlink()
-    marker.write_text(json.dumps({"version": 1, "files": sorted(expected)},
-                                 indent=2) + "\n", encoding="utf-8")
+    marker.write_text(
+        json.dumps({"version": 1, "files": sorted(expected)}, indent=2) + "\n", encoding="utf-8"
+    )
     return target, sorted(expected)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", default=".codex/agents",
-                        help="project or user Codex agent directory")
-    parser.add_argument("--plugin-root", default=str(ROOT),
-                        help="installed plugin root used in generated references")
+    parser.add_argument(
+        "--target", default=".codex/agents", help="project or user Codex agent directory"
+    )
+    parser.add_argument(
+        "--plugin-root",
+        default=str(ROOT),
+        help="installed plugin root used in generated references",
+    )
     args = parser.parse_args(argv)
     target, names = materialize(args.target, args.plugin_root)
     print("materialized %d Codex agents in %s" % (len(names), target))

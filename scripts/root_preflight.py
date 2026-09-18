@@ -37,6 +37,7 @@ dropped: hosts add tools of their own, so "observed something ungranted" would
 fire on ordinary sessions, and a check that cries wolf is a check somebody
 turns off.
 """
+
 import argparse
 import json
 import sys
@@ -70,8 +71,8 @@ def root_role():
         if role["kind"] == "root":
             return role
     raise PreflightError(
-        "no role manifest declares kind 'root', so there is nothing to check "
-        "this session against")
+        "no role manifest declares kind 'root', so there is nothing to check this session against"
+    )
 
 
 def expectations(host_name="claude-code"):
@@ -85,13 +86,15 @@ def expectations(host_name="claude-code"):
     role = root_role()
     host = render_agents.load_host(host_name)
     declared = (role.get("launch") or {}).get("delegates_to") or []
-    template = ((host.get("main_thread") or {}).get("delegate_scope") or {}
-                ).get("type_template") or "{id}"
+    template = ((host.get("main_thread") or {}).get("delegate_scope") or {}).get(
+        "type_template"
+    ) or "{id}"
     return {
         "delegate_tools": list(host["tool_map"].get("delegate") or []),
-        "agent_types": [template.format(
-            plugin=render_agents.plugin_name(host_name), id=name)
-            for name in declared],
+        "agent_types": [
+            template.format(plugin=render_agents.plugin_name(host_name), id=name)
+            for name in declared
+        ],
     }
 
 
@@ -109,21 +112,21 @@ def read_observation(path):
     except OSError as exc:
         raise PreflightError(
             "cannot read the observation at %s (%s). An absent observation is "
-            "a failed check: silence is not a pass." % (path, exc))
+            "a failed check: silence is not a pass." % (path, exc)
+        )
     except json.JSONDecodeError as exc:
         raise PreflightError("%s is not valid JSON: %s" % (path, exc))
 
     if not isinstance(document, dict):
-        raise PreflightError(
-            "%s must be a JSON object with 'tools' and 'agent_types'" % path)
+        raise PreflightError("%s must be a JSON object with 'tools' and 'agent_types'" % path)
     for key in ("tools", "agent_types"):
         value = document.get(key)
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise PreflightError(
                 "%s: %r must be a list of strings. Report what you actually "
                 "see; an observation shaped to pass is worse than no check, "
-                "because the ledger then records a guarantee nothing held."
-                % (path, key))
+                "because the ledger then records a guarantee nothing held." % (path, key)
+            )
     return {"tools": document["tools"], "agent_types": document["agent_types"]}
 
 
@@ -137,8 +140,8 @@ def judge(observed, expected):
             "the dispatch tool is missing from your toolset (%s). Either the "
             "nesting depth cap has already withheld it, or you were not "
             "started as a main-thread agent at all. You cannot reach the "
-            "orchestrator, so there is no run to isolate."
-            % ", ".join(missing))
+            "orchestrator, so there is no run to isolate." % ", ".join(missing)
+        )
 
     want = set(expected["agent_types"])
     got = set(observed["agent_types"])
@@ -149,13 +152,14 @@ def judge(observed, expected):
             "agent running as the main thread, so this session is not running "
             "under your definition. Work would flow root -> worker with "
             "nothing between, and the ledger would record an isolation that "
-            "was never in force." % ", ".join(sorted(got - want)))
+            "was never in force." % ", ".join(sorted(got - want))
+        )
     if want - got:
         refusals.append(
             "you cannot dispatch %s, which your own manifest says you must. "
             "The agent is not installed under that name, or the type list does "
-            "not match how this host names a plugin's agents."
-            % ", ".join(sorted(want - got)))
+            "not match how this host names a plugin's agents." % ", ".join(sorted(want - got))
+        )
     return refusals
 
 
@@ -183,8 +187,8 @@ def run(workspace, run_id, observed_path, host_name="claude-code"):
         raise PreflightError(
             "this session is not isolated:\n  - %s\n\nRecorded at %s. Do not "
             "orchestrate. Start the session as the root agent "
-            "(`claude --agent root-architect`) and check again."
-            % ("\n  - ".join(refusals), path))
+            "(`claude --agent root-architect`) and check again." % ("\n  - ".join(refusals), path)
+        )
     return record
 
 
@@ -197,18 +201,20 @@ def passed(workspace, run_id):
     """
     path = record_path(workspace, run_id)
     if not path.is_file():
-        return False, ("no startup check on record for run %s. Run "
-                       "root_preflight.py before starting a run: an unchecked "
-                       "session is exactly what an unisolated one looks like."
-                       % run_id)
+        return False, (
+            "no startup check on record for run %s. Run "
+            "root_preflight.py before starting a run: an unchecked "
+            "session is exactly what an unisolated one looks like." % run_id
+        )
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return False, "%s will not parse (%s), so it proves nothing" % (path, exc)
     if not record.get("passed"):
-        return False, ("the startup check for run %s is on record as FAILED: "
-                       "%s" % (run_id, "; ".join(record.get("refusals") or
-                                                 ["no reason recorded"])))
+        return False, (
+            "the startup check for run %s is on record as FAILED: "
+            "%s" % (run_id, "; ".join(record.get("refusals") or ["no reason recorded"]))
+        )
     return True, None
 
 
@@ -218,9 +224,14 @@ def cmd_check(args):
     except PreflightError as exc:
         print("  %s" % exc, file=sys.stderr)
         return 1
-    print("run %s: the boundary holds - %s dispatchable, scope %s"
-          % (args.run_id, ", ".join(record["expected"]["delegate_tools"]),
-             ", ".join(record["expected"]["agent_types"])))
+    print(
+        "run %s: the boundary holds - %s dispatchable, scope %s"
+        % (
+            args.run_id,
+            ", ".join(record["expected"]["delegate_tools"]),
+            ", ".join(record["expected"]["agent_types"]),
+        )
+    )
     return 0
 
 
@@ -238,19 +249,24 @@ def main(argv=None):
     parser.add_argument("--workspace", default=".")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--host", default="claude-code")
-    parser.add_argument("--observed",
-                        help="JSON file holding what root can see: "
-                             '{"tools": [...], "agent_types": [...]}')
-    parser.add_argument("--status", action="store_true",
-                        help="report whether a passing check is already on "
-                             "record, without making a new one")
+    parser.add_argument(
+        "--observed",
+        help='JSON file holding what root can see: {"tools": [...], "agent_types": [...]}',
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="report whether a passing check is already on record, without making a new one",
+    )
     args = parser.parse_args(argv)
     if args.status:
         return cmd_status(args)
     if not args.observed:
-        print("  --observed is required: this script judges an observation, it "
-              "cannot make one. Root reads its own toolset and writes it down.",
-              file=sys.stderr)
+        print(
+            "  --observed is required: this script judges an observation, it "
+            "cannot make one. Root reads its own toolset and writes it down.",
+            file=sys.stderr,
+        )
         return 2
     return cmd_check(args)
 
