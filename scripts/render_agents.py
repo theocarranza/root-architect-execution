@@ -534,12 +534,14 @@ def render_markdown_yaml(role, host, role_file):
     allow, deny, unmappable = resolve_tools(role, host)
     lines = ["---", "name: %s" % role["id"], "description: %s" % role["description"]]
     if caps.get("subagent_flag", {}).get("supported"):
+        flag = caps["subagent_flag"]
         field = (
-            caps["subagent_flag"]["main_thread_field"]
-            if (role.get("launch") or {}).get("main_thread")
-            else caps["subagent_flag"]["dispatched_field"]
+            flag.get("dispatched_field") or flag.get("field")
+            if is_dispatched(role)
+            else flag.get("main_thread_field") or flag.get("field")
         )
-        lines.append("%s: true" % field)
+        if field:
+            lines.append("%s: true" % field)
 
     model = host["model_map"][role["model"]["default"]]
     effort = None
@@ -776,8 +778,11 @@ def main(argv=None):
         host = dict(host)
         host["root_placeholder"] = args.root_placeholder
     out_dir = Path(args.out) if args.out else ROOT / host["bundled_dir"]
-    extension = ".toml" if host["format"] == "toml" else ".md"
-    render = render_toml if host["format"] == "toml" else render_markdown_yaml
+    format_renderers = {
+        "toml": (render_toml, ".toml"),
+        "markdown-yaml": (render_markdown_yaml, ".md"),
+    }
+    render, extension = format_renderers[host["format"]]
 
     drifted, written, skipped, stale = [], [], [], []
     for role_file, role in load_roles():
