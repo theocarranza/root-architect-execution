@@ -533,11 +533,13 @@ def render_markdown_yaml(role, host, role_file):
     prefix = host.get("root_placeholder", "<skill_root>")
     allow, deny, unmappable = resolve_tools(role, host)
     lines = ["---", "name: %s" % role["id"], "description: %s" % role["description"]]
-    if host["host"] == "gemini":
-        if (role.get("launch") or {}).get("main_thread"):
-            lines.append("mainAgent: true")
-        else:
-            lines.append("subagent: true")
+    if caps.get("subagent_flag", {}).get("supported"):
+        field = (
+            caps["subagent_flag"]["main_thread_field"]
+            if (role.get("launch") or {}).get("main_thread")
+            else caps["subagent_flag"]["dispatched_field"]
+        )
+        lines.append("%s: true" % field)
 
     model = host["model_map"][role["model"]["default"]]
     effort = None
@@ -749,7 +751,7 @@ def render_toml(role, host, role_file):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", "--target", dest="host", default="claude-code")
+    parser.add_argument("--host", default="claude-code")
     parser.add_argument(
         "--out",
         default=None,

@@ -122,7 +122,7 @@ python3 scripts/validate_interfaces.py --adapter gemini
 python3 scripts/validate_roles.py --host gemini
 
 # 3. Compilation check
-python3 scripts/build_adapter.py --target gemini
+python3 scripts/build_adapter.py --host gemini
 
 # 4. End-to-end plugin tests
 pytest tests/test_plugin.py

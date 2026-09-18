@@ -47,10 +47,7 @@
     },
     "format": {
       "type": "string",
-      "enum": [
-        "markdown-yaml",
-        "toml"
-      ]
+      "enum": ["markdown-yaml", "toml"]
     },
     "required_fields": {
       "type": "array",
@@ -77,11 +74,7 @@
     },
     "model_map": {
       "type": "object",
-      "required": [
-        "cheap",
-        "mid",
-        "strong"
-      ],
+      "required": ["cheap", "mid", "strong"],
       "additionalProperties": false,
       "description": "Vendor-neutral tier -> this host's model id. Never 'inherit'.",
       "properties": {
@@ -97,10 +90,7 @@
       }
     },
     "effort_map": {
-      "type": [
-        "object",
-        "null"
-      ],
+      "type": ["object", "null"],
       "description": "Portable effort level -> how this host spells it. Null when capabilities.reasoning_effort.supported is false.",
       "additionalProperties": {
         "type": "string"
@@ -145,14 +135,35 @@
             }
           ],
           "description": "Whether the host can attach hooks to one agent definition rather than the whole session. Where false, prohibitions fall back to session-wide hooks keyed on the agent identity the host reports."
+        },
+        "subagent_flag": {
+          "type": "object",
+          "required": ["supported", "field", "verified"],
+          "additionalProperties": false,
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "field": {
+              "type": ["string", "null"]
+            },
+            "main_thread_field": {
+              "type": ["string", "null"]
+            },
+            "dispatched_field": {
+              "type": ["string", "null"]
+            },
+            "verified": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     },
     "main_thread": {
       "type": "object",
-      "required": [
-        "verified"
-      ],
+      "required": ["verified"],
       "additionalProperties": false,
       "description": "What this host can express about an agent launched AS the main thread rather than dispatched into one. Optional, and optional on purpose: only root runs this way, so a host that ships no root needs to answer nothing here. A host that omits a sub-block declares nothing about it, and the renderer discloses the capability as absent rather than assuming either way.",
       "properties": {
@@ -163,10 +174,7 @@
         },
         "delegate_scope": {
           "type": "object",
-          "required": [
-            "supported",
-            "verified"
-          ],
+          "required": ["supported", "verified"],
           "additionalProperties": false,
           "description": "Whether this host can say WHICH agent types a delegating agent may spawn, and how it is spelled.",
           "properties": {
@@ -174,24 +182,15 @@
               "type": "boolean"
             },
             "template": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": ["string", "null"],
               "description": "How the scoped grant is written, with {tool} and {types} substituted - `Agent({types})` on Claude Code. Required when supported is true. A template rather than a flag because the renderer must emit the host's own syntax, and hardcoding one host's spelling in the renderer is what this field undoes."
             },
             "type_template": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": ["string", "null"],
               "description": "How an agent id becomes the type name this host matches, with {plugin} and {id} substituted. Separate from `template` because getting it wrong fails differently: a wrong wrapper is a syntax error, a wrong type name silently matches no agent and root can dispatch nothing."
             },
             "separator": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": ["string", "null"],
               "description": "How multiple types are joined inside the template."
             },
             "main_thread_only": {
@@ -206,10 +205,7 @@
         },
         "initial_prompt": {
           "type": "object",
-          "required": [
-            "supported",
-            "verified"
-          ],
+          "required": ["supported", "verified"],
           "additionalProperties": false,
           "description": "Whether this host auto-submits a prompt when a main-thread agent starts. Root's startup check depends on it: a check the agent must remember to run is a check that does not run on the session where it matters.",
           "properties": {
@@ -217,10 +213,7 @@
               "type": "boolean"
             },
             "field": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": ["string", "null"],
               "description": "The literal key. Required when supported is true."
             },
             "verified": {
@@ -235,20 +228,14 @@
   "$defs": {
     "capability": {
       "type": "object",
-      "required": [
-        "supported",
-        "verified"
-      ],
+      "required": ["supported", "verified"],
       "additionalProperties": false,
       "properties": {
         "supported": {
           "type": "boolean"
         },
         "field": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "The literal key the renderer writes for this capability. Required when supported is true."
         },
         "verified": {
@@ -260,9 +247,7 @@
     },
     "enforced_prohibition": {
       "type": "object",
-      "required": [
-        "verified"
-      ],
+      "required": ["verified"],
       "additionalProperties": false,
       "properties": {
         "verified": {

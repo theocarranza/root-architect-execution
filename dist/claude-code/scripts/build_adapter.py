@@ -190,7 +190,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--host", "--target", dest="host", required=True)
+    parser.add_argument("--host", required=True)
     parser.add_argument("--out", help="defaults to dist/<host>")
     parser.add_argument(
         "--check",

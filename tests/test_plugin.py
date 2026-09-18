@@ -807,10 +807,10 @@ class AdapterBuildTests(unittest.TestCase):
         res_iface = run(SCRIPTS / "validate_interfaces.py", ["--adapter", "gemini"])
         self.assertEqual(res_iface.returncode, 0, res_iface.stderr)
 
-        res_render = run(SCRIPTS / "render_agents.py", ["--target", "gemini", "--check"])
+        res_render = run(SCRIPTS / "render_agents.py", ["--host", "gemini", "--check"])
         self.assertEqual(res_render.returncode, 0, res_render.stderr)
 
-        res_build = run(SCRIPTS / "build_adapter.py", ["--target", "gemini", "--check"])
+        res_build = run(SCRIPTS / "build_adapter.py", ["--host", "gemini", "--check"])
         self.assertEqual(res_build.returncode, 0, res_build.stderr)
 
     def test_check_catches_a_source_change_that_was_never_rebuilt(self):
