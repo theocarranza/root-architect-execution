@@ -902,7 +902,9 @@ class AdapterBuildTests(unittest.TestCase):
         roles = sorted(p.stem for p in (ROOT / "roles").glob("*.json"))
         self.assertEqual(want["agents"], roles)
         self.assertEqual(
-            want["hooks"], ["PreToolUse"], "read from hooks.json's events, not its top-level key"
+            want["hooks"],
+            ["PreToolUse", "SessionStart"],
+            "read from hooks.json's events, not its top-level key",
         )
 
     def test_hook_events_come_from_the_events_not_the_wrapper(self):
