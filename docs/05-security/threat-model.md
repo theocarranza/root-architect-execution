@@ -18,6 +18,6 @@ last_reviewed: 2026-09-17
 | Stale generated agent or bundle ships | Runtime differs from reviewed source | render/build `--check`, byte comparison | Byte equality does not prove host acceptance. |
 | Internally consistent but invalid plugin ships | Installation/runtime failure | host manifest validation + smoke install | Smoke coverage is host-specific. |
 | Unsourced host capability is assumed | False security guarantee | `validate_interfaces.py`, provenance levels | Documentation can change upstream. |
-| Python 3.10 skips TOML checks | Invalid Codex TOML can ship | CI on 3.11–3.13; explicit degraded-path warning | Local contributors can still run partial checks if they ignore warning. |
+| Python <3.12 skips TOML checks | Invalid Codex TOML can ship | CI on 3.12–3.14; explicit degraded-path warning | Local contributors can still run partial checks if they ignore warning. |
 | Permission tests run as root | Fail-closed tests silently skip | CI refuses uid 0 | Local root runs remain unsafe evidence. |
 | Unlimited retry/model escalation | Cost blowout / non-termination | max attempts, recorded escalation evidence, stop conditions | Human can explicitly choose further work. |

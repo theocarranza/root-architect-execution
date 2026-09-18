@@ -19,7 +19,7 @@ last_reviewed: 2026-09-17
 
 ## Python standard-library considerations
 
-Python 3.11+ is preferred because `tomllib` is available for Codex TOML validation. On older Python versions the repository may use a fallback such as `tomli` when installed; parser-backed checks must not be assumed if no parser is present.
+Python 3.12+ is standard because `tomllib` is available in the standard library for Codex TOML validation, modern `pathlib.Path.resolve` semantics apply, and recent syntax features are supported. On older Python versions the repository may use a fallback such as `tomli` when installed; parser-backed checks must not be assumed if no parser is present.
 
 ## Host-specific
 

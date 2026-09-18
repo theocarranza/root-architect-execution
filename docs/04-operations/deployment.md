@@ -14,6 +14,7 @@ This project deploys as local host plugin/agent bundles, not as a server.
 ```sh
 python3 scripts/build_adapter.py --host claude-code
 python3 scripts/build_adapter.py --host codex
+python3 scripts/build_adapter.py --host gemini
 ```
 
 ## Claude Code installation
@@ -33,6 +34,16 @@ python3 /path/to/dist/codex/install.py \
 ```
 
 The installer is designed to be idempotent and to remove only files tracked by its own marker.
+
+## Gemini installation
+
+Build `dist/gemini`:
+
+```sh
+python3 scripts/build_adapter.py --host gemini
+```
+
+The resulting `dist/gemini` bundle contains `.gemini-plugin/plugin.json`, Markdown agent configurations under `agents/`, roles, references, schemas, scripts, and `SKILL.md`.
 
 ## Verification
 

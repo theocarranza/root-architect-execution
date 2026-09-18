@@ -10,7 +10,7 @@ last_reviewed: 2026-09-17
 ## Prerequisites
 
 - Git
-- Python 3.11+ recommended for full TOML-backed verification
+- Python 3.12+ recommended for full TOML-backed verification
 - Claude Code CLI when validating/smoke-testing the Claude adapter
 - A clone of the repository
 
@@ -34,6 +34,7 @@ dist bundles        -> rebuild; do not hand-edit
 $EDITOR roles/impl-executor.json
 python3 scripts/render_agents.py --host claude-code
 python3 scripts/render_agents.py --host codex
+python3 scripts/render_agents.py --host gemini
 python3 scripts/validate_roles.py
 ```
 
@@ -46,3 +47,14 @@ Create or update `hosts/<host>.json`, source every capability claim including un
 ## Before committing
 
 Run the full local outcome gate described in `testing.md`. A green unit suite alone is insufficient because generated artifacts and installable bundles can be stale or host-invalid while tests remain green.
+
+## Git hooks
+
+Automate code quality, formatting, and outcome gate enforcement by installing the repository's git hooks:
+
+```sh
+python3 tools/install_hooks.py
+```
+
+- **`pre-commit`**: Checks whitespace, runs Ruff linter/formatter, type-checking (Pyright/Mypy), role validation, and agent/bundle drift checks.
+- **`pre-push`**: Runs all pre-commit gates plus the complete unit test suite and smoke installation validation before allowing code to be pushed.

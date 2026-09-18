@@ -1,9 +1,10 @@
 # root-architect-execution
 
 [![Outcome Gate](https://github.com/theocarranza/root-architect-execution/actions/workflows/outcome-gate.yml/badge.svg?branch=master)](https://github.com/theocarranza/root-architect-execution/actions/workflows/outcome-gate.yml)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg)](https://docs.anthropic.com/en/docs/claude-code)
 [![Codex](https://img.shields.io/badge/Codex-supported-black.svg)](https://developers.openai.com/codex/)
+[![Gemini](https://img.shields.io/badge/Gemini-supported-4285F4.svg)](https://antigravity.google)
 [![Documentation](https://img.shields.io/badge/docs-project_documentation-informational.svg)](./docs/README.md)
 
 A contract-driven execution protocol for running implementation plans through a **root architect** that owns planning, Git history, durable state, and acceptance gates while delegating product-code changes to isolated workers.
@@ -100,6 +101,7 @@ The important architectural boundary is documented in [`docs/01-architecture/arc
 | ----------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Claude Code | Supported                    | Generated agents, plugin bundle, identity-aware PreToolUse guards, smoke installation                                                          |
 | Codex       | Supported                    | Generated TOML agents and install bootstrap; root/worker write isolation cannot currently use the same documented identity-aware hook boundary |
+| Gemini      | Supported                    | Generated markdown agents, Antigravity CLI plugin bundle, layout metadata, first-party documented interface provenance                          |
 | Cursor      | Reference / sourcing pending | Retained as a reference path; capability claims require re-verification before equivalent support is asserted                                  |
 
 Host capabilities are declared under [`hosts/`](./hosts/) and checked against adapter interface provenance.
@@ -144,6 +146,16 @@ python3 /path/to/dist/codex/install.py \
   --target .codex/agents \
   --plugin-root /path/to/dist/codex
 ```
+
+### Gemini
+
+Build the Gemini bundle:
+
+```bash
+python3 scripts/build_adapter.py --host gemini
+```
+
+The installable bundle is written to `dist/gemini`, providing `.gemini-plugin/plugin.json`, markdown role agents under `agents/`, role definitions, contracts, and scripts.
 
 See [`docs/04-operations/deployment.md`](./docs/04-operations/deployment.md) for the complete installation and deployment model.
 
@@ -272,11 +284,15 @@ $EDITOR roles/impl-executor.json
 
 python3 scripts/render_agents.py --host claude-code
 python3 scripts/render_agents.py --host codex
+python3 scripts/render_agents.py --host gemini
 
 python3 scripts/validate_roles.py
 
 python3 scripts/build_adapter.py --host claude-code
 python3 scripts/build_adapter.py --host codex
+python3 scripts/build_adapter.py --host gemini
+
+python3 tools/lint.py --fix
 ```
 
 See [`docs/03-engineering/development.md`](./docs/03-engineering/development.md) before changing declarations, host interfaces, guards, schemas, or packaging.
@@ -288,11 +304,15 @@ The repository's outcome gate is intentionally broader than its unit test suite:
 ```bash
 python3 -m unittest discover -s tests -t .
 
+python3 tools/lint.py --check
+
 python3 scripts/render_agents.py --host claude-code --check
 python3 scripts/render_agents.py --host codex --check
+python3 scripts/render_agents.py --host gemini --check
 
 python3 scripts/build_adapter.py --host claude-code --check
 python3 scripts/build_adapter.py --host codex --check
+python3 scripts/build_adapter.py --host gemini --check
 
 python3 scripts/validate_interfaces.py
 python3 scripts/validate_roles.py
@@ -300,10 +320,10 @@ python3 scripts/validate_roles.py
 python3 scripts/smoke_install.py --host claude-code
 claude plugin validate dist/claude-code
 
-python3.11 -m unittest discover -s tests -t .
+python3.12 -m unittest discover -s tests -t .
 ```
 
-The final Python 3.11+ run ensures TOML-backed Codex assertions execute with `tomllib`.
+The final Python 3.12+ run ensures TOML-backed Codex assertions execute with `tomllib`.
 
 The same outcome gate runs in GitHub Actions on pushes to `master` and pull requests.
 
@@ -329,7 +349,7 @@ See [`docs/05-security/security.md`](./docs/05-security/security.md) and [`docs/
 
 The authoritative status is maintained in [`HANDOFF.md`](./HANDOFF.md) and [`docs/06-delivery/roadmap.md`](./docs/06-delivery/roadmap.md).
 
-The current architecture includes the root execution protocol, declared roles, schema-checked runtime contracts, generated Claude Code and Codex adapters, durable dispatch state, runtime guards, bundle validation, smoke installation, and CI outcome gating.
+The current architecture includes the root execution protocol, declared roles, schema-checked runtime contracts, generated Claude Code, Codex, and Gemini adapters, durable dispatch state, runtime guards, bundle validation, smoke installation, and CI outcome gating.
 
 Live end-to-end evidence should remain distinguished from intended protocol behavior. Consult the handoff before assuming that every execution path has been observed in a real host run.
 
@@ -341,7 +361,7 @@ Before submitting a change:
 2. Add or update targeted regression tests.
 3. Regenerate affected host agents.
 4. Rebuild affected host bundles.
-5. Run the complete outcome gate.
+5. Run the complete outcome gate (or install automated hooks via `python3 tools/install_hooks.py`).
 6. Update documentation when a contract, capability, workflow, or operational procedure changes.
 
 Contributor onboarding is available at [`docs/07-guides/onboarding.md`](./docs/07-guides/onboarding.md).
