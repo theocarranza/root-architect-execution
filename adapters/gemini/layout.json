@@ -1,0 +1,20 @@
+{
+  "host": "gemini",
+  "bundle_root": ".",
+  "description": "Gemini adapter layout projecting canonical agents, schemas, roles, scripts, and references into dist/gemini/.",
+  "place": {
+    "adapters/gemini/manifest.template.json": "plugin.json",
+    "adapters/gemini/gemini-plugin.template.json": ".gemini-plugin/plugin.json",
+    "adapters/gemini/agents/": "agents/",
+    "adapters/gemini/agent-interface.json": "adapters/gemini/agent-interface.json",
+    "adapters/gemini/layout.json": "adapters/gemini/layout.json",
+    "hosts/gemini.json": "hosts/gemini.json",
+    "roles/": "roles/",
+    "references/": "references/",
+    "schemas/": "schemas/",
+    "scripts/": "scripts/",
+    "adapters/gemini/skill.template.md": "skills/root-architect-execution/SKILL.md",
+    "SKILL.md": "SKILL.md"
+  },
+  "exclude": ["**/__pycache__/**", "**/*.pyc"]
+}

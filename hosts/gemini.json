@@ -1,0 +1,87 @@
+{
+  "host": "gemini",
+  "verified_on": "2026-09-17",
+  "source": "Google Antigravity / Gemini CLI custom agents specification: https://antigravity.google/docs/cli/overview and https://raw.githubusercontent.com/google-antigravity/antigravity-cli/main/CHANGELOG.md; ~/.gemini/config/agents/ and .agents/agents/ frontmatter schema.",
+  "agent_dir": "agents",
+  "bundled_dir": "adapters/gemini/agents",
+  "root_placeholder": "<skill_root>",
+  "format": "markdown-yaml",
+  "required_fields": [
+    "name",
+    "description"
+  ],
+  "tool_map": {
+    "read-files": [
+      "view_file"
+    ],
+    "search-files": [
+      "grep_search",
+      "find_by_name"
+    ],
+    "edit-files": [
+      "replace_file_content"
+    ],
+    "create-files": [
+      "write_to_file"
+    ],
+    "run-commands": [
+      "run_command"
+    ],
+    "delegate": [
+      "invoke_subagent"
+    ]
+  },
+  "model_map": {
+    "cheap": "flash",
+    "mid": "flash",
+    "strong": "pro"
+  },
+  "effort_map": null,
+  "capabilities": {
+    "explicit_model": {
+      "supported": true,
+      "field": "model",
+      "verified": "Documented values flash, pro, or inherit in custom agent frontmatter."
+    },
+    "reasoning_effort": {
+      "supported": false,
+      "field": null,
+      "verified": "No per-agent reasoning effort frontmatter field is documented."
+    },
+    "tool_allowlist": {
+      "supported": true,
+      "field": "tools",
+      "verified": "Documented frontmatter field 'tools' allowlist: presence in the list grants capabilities."
+    },
+    "tool_denylist": {
+      "supported": true,
+      "field": "disallowedTools",
+      "verified": "Documented frontmatter field 'disallowedTools' explicitly restricting specific tools."
+    },
+    "read_only_enforced": {
+      "supported": true,
+      "field": "tools",
+      "verified": "Read-only is enforced by omitting write/edit tools (write_to_file, replace_file_content) from the tools allowlist."
+    },
+    "scoped_hooks": {
+      "supported": false,
+      "field": null,
+      "verified": "No per-agent hooks frontmatter field; relies on Python guard scripts."
+    }
+  },
+  "main_thread": {
+    "verified": "Main agent behavior verified via Antigravity/Gemini agent specification.",
+    "delegate_scope": {
+      "supported": false,
+      "template": null,
+      "type_template": null,
+      "separator": null,
+      "verified": "Gemini does not support type-restricted delegation syntax inside tools allowlist; restrictions are prompt-enforced."
+    },
+    "initial_prompt": {
+      "supported": false,
+      "field": null,
+      "verified": "No initialPrompt auto-submission frontmatter field."
+    }
+  }
+}
