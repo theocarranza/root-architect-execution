@@ -8,6 +8,7 @@ suite — the mini validator is checked through the contracts that use it.
 """
 
 import contextlib
+import importlib.util
 import json
 import os
 import shutil
@@ -34,24 +35,21 @@ sys.path.insert(0, str(SCRIPTS))
 # by path rather than imported off sys.path. Putting adapters/codex/ on the
 # path would also make every other host's mechanics importable by bare name,
 # which is the coupling the adapter directories exist to prevent.
-import importlib.util  # noqa: E402
-
-import render_agents  # noqa: E402
+import build_adapter  # noqa: E402
 from dispatch_state import DispatchStateError  # noqa: E402
+import job_queue  # noqa: E402
 from jsonschema_mini import Validator  # noqa: E402
+import mailbox  # noqa: E402
+import render_agents  # noqa: E402
+import root_preflight  # noqa: E402
+import smoke_install  # noqa: E402
+import validate_interfaces  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location(
     "codex_install", ROOT / "adapters" / "codex" / "install.py"
 )
 install_codex = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(install_codex)
-import mailbox  # noqa: E402
-
-import build_adapter  # noqa: E402
-import job_queue  # noqa: E402
-import root_preflight  # noqa: E402
-import smoke_install  # noqa: E402
-import validate_interfaces  # noqa: E402
 
 
 def setUpModule():
@@ -195,7 +193,7 @@ class MiniValidatorTests(unittest.TestCase):
                 )
                 self.assertTrue(
                     any("pattern" in e for e in errors),
-                    f"Schema should reject control char {repr(control_char)}",
+                    f"Schema should reject control char {control_char!r}",
                 )
 
     def test_rejects_control_characters_in_read_paths(self):
@@ -208,7 +206,7 @@ class MiniValidatorTests(unittest.TestCase):
                 )
                 self.assertTrue(
                     any("pattern" in e for e in errors),
-                    f"Schema should reject control char {repr(control_char)}",
+                    f"Schema should reject control char {control_char!r}",
                 )
 
     def test_anyof_accepts_both_effort_forms(self):

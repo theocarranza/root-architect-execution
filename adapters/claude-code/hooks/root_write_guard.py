@@ -294,7 +294,7 @@ def _main():
     # DISPATCH STATE VERIFICATION & WRITE-PATH CHECK
     # ------------------------------------------------------------------
     try:
-        from dispatch_state import active_dispatch, DispatchStateError
+        from dispatch_state import DispatchStateError, active_dispatch
     except ImportError:
         directory = Path(workspace) / ".root-architect" / "state"
         if directory.is_dir():
