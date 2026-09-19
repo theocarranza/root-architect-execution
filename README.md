@@ -1,6 +1,7 @@
 # root-architect-execution
 
-[![Outcome Gate](https://github.com/theocarranza/root-architect-execution/actions/workflows/outcome-gate.yml/badge.svg?branch=master)](https://github.com/theocarranza/root-architect-execution/actions/workflows/outcome-gate.yml)
+[![Outcome Gate](https://github.com/theocarranza/root-architect-execution/actions/workflows/outcome-gate.yml/badge.svg?branch=main)](https://github.com/theocarranza/root-architect-execution/actions/workflows/outcome-gate.yml)
+[![Version](https://img.shields.io/github/v/release/theocarranza/root-architect-execution?sort=semver&color=brightgreen&label=version)](https://github.com/theocarranza/root-architect-execution/releases)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg)](https://docs.anthropic.com/en/docs/claude-code)
 [![Codex](https://img.shields.io/badge/Codex-supported-black.svg)](https://developers.openai.com/codex/)
