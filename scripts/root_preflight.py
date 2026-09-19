@@ -184,10 +184,16 @@ def judge(observed, expected, host_name="claude-code", workspace="."):
 
 
 def find_gemini_hooks_json(workspace):
+    root = Path(__file__).resolve().parent.parent
     for candidate in (
         Path(workspace) / "hooks.json",
+        Path(workspace) / "hooks" / "hooks.json",
         Path(workspace) / "adapters" / "gemini" / "hooks" / "hooks.json",
         Path(workspace) / "dist" / "gemini" / "hooks.json",
+        root / "hooks.json",
+        root / "hooks" / "hooks.json",
+        root / "adapters" / "gemini" / "hooks" / "hooks.json",
+        root / "dist" / "gemini" / "hooks.json",
         Path.home() / ".gemini" / "config" / "plugins" / "root-architect-execution" / "hooks.json",
     ):
         if candidate.is_file():
