@@ -2024,6 +2024,96 @@ class RootWriteGuardTests(unittest.TestCase):
             sink.close()
         self.assertEqual(result.returncode, 0)
 
+    def test_blocks_root_writing_to_protected_product_dirs_without_dispatch(self):
+        for path in ("lib/main.dart", "functions/index.py"):
+            with self.subTest(path=path):
+                result = self.call(path=path)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("protected product directory", result.stderr)
+
+    def test_allows_worker_writing_to_protected_product_dirs_when_in_write_paths(self):
+        self.open_dispatch(valid_brief(write_paths=["lib/main.dart"]))
+        result = self.call(path="lib/main.dart", agent_type="impl-executor")
+        self.assertEqual(result.returncode, 0)
+
+    def test_blocks_root_mutating_dispatch_state_via_bash(self):
+        for cmd in (
+            "python3 scripts/dispatch_state.py close --run-id x --outcome accepted",
+            "python3 -c '...' .root-architect/state/dispatch-x.json",
+            "rm -f .root-architect/state/dispatch-x.json",
+        ):
+            with self.subTest(cmd=cmd):
+                payload = {
+                    "tool_name": "Bash",
+                    "cwd": str(self.workspace),
+                    "tool_input": {"command": cmd},
+                }
+                result = self.raw_call(payload)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("mutate a dispatch state file", result.stderr)
+
+    def test_blocks_root_editing_dispatch_state_file_directly(self):
+        result = self.call(path=".root-architect/state/dispatch-x.json")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("state edit block", result.stderr)
+
+    def test_blocks_root_dispatching_workers_via_agent_tool(self):
+        for worker in ("impl-executor", "spec-validator", "quality-validator"):
+            with self.subTest(worker=worker):
+                payload = {
+                    "tool_name": "Agent",
+                    "cwd": str(self.workspace),
+                    "tool_input": {"agent_type": worker},
+                }
+                result = self.raw_call(payload)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("strictly restricted to dispatching 'orchestrator'", result.stderr)
+
+    def test_allows_root_dispatching_orchestrator_via_agent_tool(self):
+        payload = {
+            "tool_name": "Agent",
+            "cwd": str(self.workspace),
+            "tool_input": {"agent_type": "orchestrator"},
+        }
+        result = self.raw_call(payload)
+        self.assertEqual(result.returncode, 0)
+
+    def test_allows_orchestrator_dispatching_workers_via_agent_tool(self):
+        for worker in ("impl-executor", "spec-validator", "quality-validator"):
+            with self.subTest(worker=worker):
+                payload = {
+                    "tool_name": "Agent",
+                    "cwd": str(self.workspace),
+                    "agent_type": "orchestrator",
+                    "tool_input": {"agent_type": worker},
+                }
+                result = self.raw_call(payload)
+                self.assertEqual(result.returncode, 0)
+
+    def test_blocks_orchestrator_dispatching_orchestrator_via_agent_tool(self):
+        payload = {
+            "tool_name": "Agent",
+            "cwd": str(self.workspace),
+            "agent_type": "orchestrator",
+            "tool_input": {"agent_type": "orchestrator"},
+        }
+        result = self.raw_call(payload)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot dispatch another orchestrator", result.stderr)
+
+    def test_blocks_worker_dispatching_via_agent_tool(self):
+        for worker in ("impl-executor", "spec-validator", "quality-validator"):
+            with self.subTest(worker=worker):
+                payload = {
+                    "tool_name": "Agent",
+                    "cwd": str(self.workspace),
+                    "agent_type": worker,
+                    "tool_input": {"agent_type": "impl-executor"},
+                }
+                result = self.raw_call(payload)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("workers are not permitted to dispatch subagents", result.stderr)
+
 
 class WorkerGitGuardTests(unittest.TestCase):
     def call(self, agent_type, command=None, tool="Bash"):

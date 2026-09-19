@@ -173,7 +173,85 @@ class TestGeminiWriteGuard(unittest.TestCase):
             code, result = self.run_guard(payload)
             self.assertEqual(code, 0)
             self.assertEqual(result.get("decision"), "deny")
-            self.assertIn("dispatch state", result.get("reason", ""))
+
+    def test_root_cannot_write_to_protected_product_dirs_even_without_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for protected_path in ("lib/feature.dart", "functions/main.py"):
+                with self.subTest(path=protected_path):
+                    payload = {
+                        "workspacePaths": [tmpdir],
+                        "toolCall": {
+                            "name": "write_to_file",
+                            "args": {
+                                "TargetFile": protected_path,
+                                "CodeContent": "// product code",
+                            },
+                        },
+                    }
+                    code, result = self.run_guard(payload)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(result.get("decision"), "deny")
+                    self.assertIn("protected product directory", result.get("reason", ""))
+
+    def test_worker_can_write_to_protected_product_dirs_when_in_write_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            brief = valid_brief(write_paths=["lib/feature.dart"])
+            self.open_dispatch(ws, brief=brief)
+
+            payload = {
+                "workspacePaths": [tmpdir],
+                "agent_role": "worker",
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {
+                        "TargetFile": "lib/feature.dart",
+                        "CodeContent": "// worker implementation",
+                    },
+                },
+            }
+            code, result = self.run_guard(payload)
+            self.assertEqual(code, 0)
+            self.assertEqual(result.get("decision"), "allow")
+
+    def test_root_cannot_mutate_dispatch_state_via_run_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for cmd in (
+                "python3 scripts/dispatch_state.py close --run-id 20260918-task-1 --outcome accepted",
+                "python3 -c 'import json; ...' .root-architect/state/dispatch-1.json",
+                "echo 'closed' > .root-architect/state/dispatch-1.json",
+            ):
+                with self.subTest(cmd=cmd):
+                    payload = {
+                        "workspacePaths": [tmpdir],
+                        "toolCall": {
+                            "name": "run_command",
+                            "args": {"CommandLine": cmd},
+                        },
+                    }
+                    code, result = self.run_guard(payload)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(result.get("decision"), "deny")
+                    self.assertIn("mutate a dispatch state file", result.get("reason", ""))
+
+    def test_root_cannot_edit_dispatch_state_file_directly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payload = {
+                "workspacePaths": [tmpdir],
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {
+                        "TargetFile": ".root-architect/state/dispatch-20260918-task-1.json",
+                        "CodeContent": "{}",
+                    },
+                },
+            }
+            code, result = self.run_guard(payload)
+            self.assertEqual(code, 0)
+            self.assertEqual(result.get("decision"), "deny")
+            self.assertIn(
+                "dispatch state files under .root-architect/state/", result.get("reason", "")
+            )
 
 
 if __name__ == "__main__":
