@@ -3275,6 +3275,19 @@ class PreflightTests(unittest.TestCase):
             self.check(agent_types=())
         self.assertIn("cannot dispatch", str(caught.exception))
 
+    def test_root_holding_define_subagent_is_refused(self):
+        """Root must never hold define_subagent."""
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            self.check(tools=("Agent", "define_subagent"))
+        self.assertIn("root holds 'define_subagent'", str(caught.exception))
+
+    def test_gemini_auto_interrogation_preflight(self):
+        """Gemini runtime auto-interrogation verifies boundary and hooks."""
+        record = root_preflight.run(self.ws, self.RUN, host_name="gemini", auto=True)
+        self.assertTrue(record["passed"])
+        self.assertEqual(record["observed"]["agent_types"], ["orchestrator"])
+        self.assertNotIn("define_subagent", record["observed"]["tools"])
+
     def test_a_refusal_is_recorded_too(self):
         """A refused run and an unchecked one must not look the same after."""
         with self.assertRaises(root_preflight.PreflightError):

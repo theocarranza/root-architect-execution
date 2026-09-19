@@ -136,19 +136,26 @@ def build(host, out_dir):
     return sorted(written)
 
 
-def tree(root):
+def tree(root, patterns=None):
     root = Path(root)
-    return sorted(p.relative_to(root) for p in root.rglob("*") if p.is_file())
+    files = []
+    for p in root.rglob("*"):
+        if p.is_file():
+            rel = p.relative_to(root)
+            if patterns and excluded(rel, patterns):
+                continue
+            files.append(rel)
+    return sorted(files)
 
 
-def compare(built_dir, committed_dir):
+def compare(built_dir, committed_dir, patterns=None):
     """Missing, extra and differing are three separate failures.
 
     Collapsing them into one "out of sync" loses the only information that
     tells a reader whether the build changed, the sources changed, or someone
     edited the bundle by hand.
     """
-    built, committed = set(tree(built_dir)), set(tree(committed_dir))
+    built, committed = set(tree(built_dir, patterns)), set(tree(committed_dir, patterns))
     missing = sorted(built - committed)
     extra = sorted(committed - built)
     differing = sorted(
@@ -164,14 +171,16 @@ def cmd_check(host):
     if not committed.is_dir():
         print("no committed bundle to check: dist/%s" % host, file=sys.stderr)
         return 1
+    layout = load_layout(host)
+    patterns = layout.get("exclude") or []
     with tempfile.TemporaryDirectory() as scratch:
         fresh = Path(scratch) / host
         build(host, fresh)
-        missing, extra, differing = compare(fresh, committed)
+        missing, extra, differing = compare(fresh, committed, patterns)
     if not (missing or extra or differing):
         print(
             "in sync: dist/%s matches a fresh build from adapters/%s and the "
-            "repository core (%d files)" % (host, host, len(tree(committed)))
+            "repository core (%d files)" % (host, host, len(tree(committed, patterns)))
         )
         return 0
     print("dist/%s does NOT match a fresh build:" % host, file=sys.stderr)

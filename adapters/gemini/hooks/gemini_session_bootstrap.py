@@ -89,8 +89,9 @@ def main() -> int:
 
     invocation_num = data.get("invocationNum", 1)
 
-    # Only fire on initial session turn
-    if invocation_num == 1 and is_root_session(data):
+    # The root architect protocol is enforced unconditionally at session start (invocationNum == 1).
+    # It is NOT conditional, NOT optional.
+    if invocation_num == 1:
         output = {"injectSteps": [{"ephemeralMessage": BOOTSTRAP_PROMPT}]}
     else:
         output = {"injectSteps": []}

@@ -91,7 +91,7 @@ class TestGeminiSessionBootstrapHook(unittest.TestCase):
             self.assertEqual(len(result["injectSteps"]), 1)
             self.assertIn("root_preflight.py", result["injectSteps"][0]["ephemeralMessage"])
 
-    def test_turn_one_unrelated_session(self):
+    def test_turn_one_unconditional_session(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = {
                 "invocationNum": 1,
@@ -100,7 +100,8 @@ class TestGeminiSessionBootstrapHook(unittest.TestCase):
             }
             code, result = self.run_hook(payload)
             self.assertEqual(code, 0)
-            self.assertEqual(result, {"injectSteps": []})
+            self.assertEqual(len(result["injectSteps"]), 1)
+            self.assertIn("Root Architect Mode", result["injectSteps"][0]["ephemeralMessage"])
 
     def test_turn_greater_than_one_zero_overhead(self):
         with tempfile.TemporaryDirectory() as tmpdir:

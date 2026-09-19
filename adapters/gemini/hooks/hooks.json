@@ -7,5 +7,33 @@
         "timeout": 5
       }
     ]
+  },
+  "root-architect-subagent-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "define_subagent|invoke_subagent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/gemini_subagent_guard.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "root-architect-write-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/root_write_guard.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
   }
 }

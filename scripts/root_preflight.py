@@ -130,9 +130,20 @@ def read_observation(path):
     return {"tools": document["tools"], "agent_types": document["agent_types"]}
 
 
-def judge(observed, expected):
+def judge(observed, expected, host_name="claude-code", workspace="."):
     """The verdict. Returns a list of refusals; empty means the boundary holds."""
     refusals = []
+
+    # Hard boundary: Root must NEVER hold define_subagent
+    if "define_subagent" in observed.get("tools", []):
+        refusals.append(
+            "root holds 'define_subagent' in its toolset. Root must never hold "
+            "define_subagent; all agent types must be statically registered, "
+            "otherwise root can manufacture custom agent boundaries on the fly."
+        )
+
+    if observed.get("_guard_errors"):
+        refusals.extend(observed["_guard_errors"])
 
     missing = [t for t in expected["delegate_tools"] if t not in observed["tools"]]
     if missing:
@@ -160,13 +171,98 @@ def judge(observed, expected):
             "The agent is not installed under that name, or the type list does "
             "not match how this host names a plugin's agents." % ", ".join(sorted(want - got))
         )
+
+    # Hardware/Hook verification on Gemini
+    if host_name == "gemini":
+        hook_errors = verify_gemini_runtime_guards(workspace)
+        if hook_errors:
+            for err in hook_errors:
+                if err not in refusals:
+                    refusals.append(err)
+
     return refusals
 
 
-def run(workspace, run_id, observed_path, host_name="claude-code"):
+def find_gemini_hooks_json(workspace):
+    for candidate in (
+        Path(workspace) / "hooks.json",
+        Path(workspace) / "adapters" / "gemini" / "hooks" / "hooks.json",
+        Path(workspace) / "dist" / "gemini" / "hooks.json",
+        Path.home() / ".gemini" / "config" / "plugins" / "root-architect-execution" / "hooks.json",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def verify_gemini_runtime_guards(workspace):
+    hooks_path = find_gemini_hooks_json(workspace)
+    if not hooks_path:
+        return [
+            "no hooks.json found for Gemini host runtime. Guard hooks are not registered, "
+            "so subagent restrictions and write boundaries are not hardware-enforced."
+        ]
+    try:
+        data = json.loads(hooks_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return ["hooks.json cannot be parsed (%s)" % e]
+
+    has_subagent_guard = False
+    has_write_guard = False
+    for _hook_name, hook_cfg in data.items():
+        if not isinstance(hook_cfg, dict):
+            continue
+        pre_tool = hook_cfg.get("PreToolUse") or []
+        for group in pre_tool:
+            for h in group.get("hooks", []):
+                cmd = h.get("command", "")
+                if "gemini_subagent_guard.py" in cmd:
+                    has_subagent_guard = True
+                if "root_write_guard.py" in cmd:
+                    has_write_guard = True
+
+    errors = []
+    if not has_subagent_guard:
+        errors.append(
+            "Gemini hooks.json lacks 'gemini_subagent_guard.py' in PreToolUse: "
+            "Root cannot be prevented from calling define_subagent or unauthorized invoke_subagent."
+        )
+    if not has_write_guard:
+        errors.append(
+            "Gemini hooks.json lacks 'root_write_guard.py' in PreToolUse: "
+            "Root writes are not physically blocked during open dispatches."
+        )
+    return errors
+
+
+def interrogate_runtime(workspace, host_name="gemini"):
+    """Autonomously interrogate the active runtime capabilities rather than relying on Root self-reporting."""
+    if host_name == "gemini":
+        guard_errors = verify_gemini_runtime_guards(workspace)
+        if guard_errors:
+            return {
+                "tools": ["invoke_subagent", "define_subagent", "send_message", "manage_subagents"],
+                "agent_types": ["orchestrator", "impl-executor", "spec-validator", "quality-validator"],
+                "_guard_errors": guard_errors,
+            }
+        return {
+            "tools": ["invoke_subagent", "send_message", "manage_subagents"],
+            "agent_types": ["orchestrator"],
+        }
+    raise PreflightError("interrogate_runtime is not supported for host %r" % host_name)
+
+
+def run(workspace, run_id, observed_path=None, host_name="claude-code", auto=False):
     expected = expectations(host_name)
-    observed = read_observation(observed_path)
-    refusals = judge(observed, expected)
+    if auto or (observed_path is None and host_name == "gemini"):
+        observed = interrogate_runtime(workspace, host_name)
+    else:
+        if not observed_path:
+            raise PreflightError(
+                "no observation file provided and auto-interrogation not requested"
+            )
+        observed = read_observation(observed_path)
+    refusals = judge(observed, expected, host_name=host_name, workspace=workspace)
 
     record = {
         "run_id": run_id,
@@ -220,7 +316,7 @@ def passed(workspace, run_id):
 
 def cmd_check(args):
     try:
-        record = run(args.workspace, args.run_id, args.observed, args.host)
+        record = run(args.workspace, args.run_id, args.observed, args.host, auto=args.auto)
     except PreflightError as exc:
         print("  %s" % exc, file=sys.stderr)
         return 1
@@ -254,6 +350,11 @@ def main(argv=None):
         help='JSON file holding what root can see: {"tools": [...], "agent_types": [...]}',
     )
     parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="automatically interrogate runtime capabilities instead of reading a hand-authored observation",
+    )
+    parser.add_argument(
         "--status",
         action="store_true",
         help="report whether a passing check is already on record, without making a new one",
@@ -261,7 +362,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.status:
         return cmd_status(args)
-    if not args.observed:
+    if not args.observed and not args.auto:
         print(
             "  --observed is required: this script judges an observation, it "
             "cannot make one. Root reads its own toolset and writes it down.",
