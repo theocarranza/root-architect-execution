@@ -3,25 +3,15 @@
   "verified_on": "2026-09-04",
   "source": "INHERITED, NOT RE-VERIFIED. Carried from the orchestration-quality-control host capability matrix dated 2026-09-04 and its shipped .cursor agent files. The Claude row of that same matrix was found wrong on 2026-09-07, so re-verify against Cursor's own documentation before relying on a disclosure produced from these rows.",
   "agent_dir": ".cursor/agents",
-  "bundled_dir": "dist/cursor",
+  "bundled_dir": "adapters/cursor/agents",
   "format": "markdown-yaml",
   "required_fields": [],
   "tool_map": {
-    "read-files": [
-      "read"
-    ],
-    "search-files": [
-      "search"
-    ],
-    "edit-files": [
-      "edit"
-    ],
-    "create-files": [
-      "edit"
-    ],
-    "run-commands": [
-      "terminal"
-    ]
+    "read-files": ["read"],
+    "search-files": ["search"],
+    "edit-files": ["edit"],
+    "create-files": ["edit"],
+    "run-commands": ["terminal"]
   },
   "model_map": {
     "cheap": "claude-haiku-4-5",

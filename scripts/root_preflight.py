@@ -242,7 +242,12 @@ def interrogate_runtime(workspace, host_name="gemini"):
         if guard_errors:
             return {
                 "tools": ["invoke_subagent", "define_subagent", "send_message", "manage_subagents"],
-                "agent_types": ["orchestrator", "impl-executor", "spec-validator", "quality-validator"],
+                "agent_types": [
+                    "orchestrator",
+                    "impl-executor",
+                    "spec-validator",
+                    "quality-validator",
+                ],
                 "_guard_errors": guard_errors,
             }
         return {

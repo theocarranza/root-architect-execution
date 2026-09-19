@@ -1,0 +1,83 @@
+# Automated multi-host release pipeline.
+#
+# Triggers on tag creation matching v* (e.g. v0.3.0) or manual workflow_dispatch.
+# Validates the codebase, runs tests, builds all adapter distribution bundles,
+# packages them into standalone archives with sha256 checksums, and publishes a GitHub release.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, test, and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Refuse to run as root
+        run: |
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "::error::Running as root. The permission-bit tests would skip and this gate would pass fail-open."
+            exit 1
+          fi
+
+      - name: Install linter
+        run: pip install ruff
+
+      - name: Code quality and formatting check
+        run: python3 tools/lint.py --check
+
+      - name: Capability gate
+        run: python3 scripts/validate_roles.py
+
+      - name: Check generated agents match roles
+        run: |
+          python3 scripts/render_agents.py --host claude-code --check
+          python3 scripts/render_agents.py --host codex --check
+          python3 scripts/render_agents.py --host cursor --check
+          python3 scripts/render_agents.py --host gemini --check
+
+      - name: Sourced interface check
+        run: python3 scripts/validate_interfaces.py
+
+      - name: Run test suite
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Build all host adapter bundles
+        run: python3 scripts/build_adapter.py --all --check
+
+      - name: Package release archives
+        run: |
+          mkdir -p release-assets
+          for host in claude-code codex gemini; do
+            archive_name="root-architect-execution-${host}.zip"
+            echo "Packaging ${archive_name} from dist/${host}..."
+            (cd "dist/${host}" && zip -r "../../release-assets/${archive_name}" . -x "**/__pycache__/*" -x "*.pyc")
+          done
+          cd release-assets
+          sha256sum root-architect-execution-*.zip > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/root-architect-execution-*.zip
+            release-assets/checksums.txt
+          generate_release_notes: true

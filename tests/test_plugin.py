@@ -54,6 +54,14 @@ import smoke_install  # noqa: E402
 import validate_interfaces  # noqa: E402
 
 
+def setUpModule():
+    """Ensure all distribution bundles exist for tests that examine dist/."""
+    for host in build_adapter.all_hosts():
+        bundle = ROOT / "dist" / host
+        if not bundle.is_dir():
+            build_adapter.build(host, bundle)
+
+
 @contextlib.contextmanager
 def mock_adapters(directory):
     """Point build_adapter at a scratch adapters/ tree.
@@ -460,8 +468,8 @@ class RenderTests(unittest.TestCase):
 
     def test_empty_mapped_allow_list_never_produces_allowed_period(self):
         """Test requirement (a): no generated file contains the malformed 'Allowed: .' string."""
-        # Check dist/ directory
-        for toml_file in (ROOT / "dist" / "codex").glob("*.toml"):
+        # Check codex agents directory
+        for toml_file in (ROOT / "adapters" / "codex" / "agents").glob("*.toml"):
             text = toml_file.read_text(encoding="utf-8")
             self.assertNotIn(
                 "Allowed: .", text, f"Found malformed 'Allowed: .' in {toml_file.name}"
@@ -2840,7 +2848,7 @@ class AgentInterfaceTests(unittest.TestCase):
         missing one: it looks generated and current.
         """
         tree = self.sandbox()
-        stale = tree / "dist/cursor"
+        stale = tree / "adapters/cursor/agents"
         stale.mkdir(parents=True, exist_ok=True)
         (stale / "orchestrator.md").write_text("stale\n", encoding="utf-8")
 
@@ -3084,7 +3092,7 @@ class RootAgentTests(unittest.TestCase):
         self.assertFalse(enforced)
         self.assertIn("maps no tool name to delegation", note)
 
-        generated = (ROOT / "dist/cursor/root-architect.md").read_text(encoding="utf-8")
+        generated = (ROOT / "adapters/cursor/agents/root-architect.md").read_text(encoding="utf-8")
         self.assertIn("maps no tool name to delegation", generated)
 
     # --- the startup prompt -------------------------------------------------

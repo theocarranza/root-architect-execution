@@ -43,7 +43,9 @@ def _check_command_line(cmd: str, root: Path, owned_paths: list[Path]) -> str | 
     for owned in owned_paths:
         rel = str(owned.relative_to(root)) if owned.is_relative_to(root) else str(owned)
         # Check if the path or filename is redirected to: '> file', '>> file', 'tee file'
-        pattern = rf"(?:>|>>|\btee\b\s+)(?:[^\w\s/.-]*\s*)?(?:{re.escape(rel)}|{re.escape(str(owned))})"
+        pattern = (
+            rf"(?:>|>>|\btee\b\s+)(?:[^\w\s/.-]*\s*)?(?:{re.escape(rel)}|{re.escape(str(owned))})"
+        )
         if re.search(pattern, cmd):
             return rel
     return None
@@ -136,7 +138,11 @@ def main() -> int:
             return 0
 
         try:
-            target = (root / target_file).resolve() if not Path(target_file).is_absolute() else Path(target_file).resolve()
+            target = (
+                (root / target_file).resolve()
+                if not Path(target_file).is_absolute()
+                else Path(target_file).resolve()
+            )
         except (OSError, ValueError, RuntimeError):
             json.dump({"decision": "allow"}, sys.stdout)
             return 0

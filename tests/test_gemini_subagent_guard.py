@@ -82,7 +82,10 @@ class TestGeminiSubagentGuard(unittest.TestCase):
                 code, result = self.run_guard(payload)
                 self.assertEqual(code, 0)
                 self.assertEqual(result.get("decision"), "deny")
-                self.assertIn("Root is strictly restricted to dispatching 'orchestrator'", result.get("reason", ""))
+                self.assertIn(
+                    "Root is strictly restricted to dispatching 'orchestrator'",
+                    result.get("reason", ""),
+                )
 
     def test_invoke_subagent_mixed_types_is_denied(self):
         payload = {

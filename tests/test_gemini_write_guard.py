@@ -49,11 +49,23 @@ class TestGeminiWriteGuard(unittest.TestCase):
         result = json.loads(proc.stdout)
         return proc.returncode, result
 
-    def open_dispatch(self, workspace: Path, brief: dict | None = None, run_id: str = "20260918-task-1"):
+    def open_dispatch(
+        self, workspace: Path, brief: dict | None = None, run_id: str = "20260918-task-1"
+    ):
         brief_path = workspace / "brief.json"
         brief_path.write_text(json.dumps(brief or valid_brief()), encoding="utf-8")
         proc = subprocess.run(
-            [sys.executable, str(DISPATCH_STATE), "open", "--workspace", str(workspace), "--brief", str(brief_path), "--run-id", run_id],
+            [
+                sys.executable,
+                str(DISPATCH_STATE),
+                "open",
+                "--workspace",
+                str(workspace),
+                "--brief",
+                str(brief_path),
+                "--run-id",
+                run_id,
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -116,7 +128,11 @@ class TestGeminiWriteGuard(unittest.TestCase):
                 "workspacePaths": [tmpdir],
                 "toolCall": {
                     "name": "replace_file_content",
-                    "args": {"TargetFile": "src/feature.py", "TargetContent": "a", "ReplacementContent": "b"},
+                    "args": {
+                        "TargetFile": "src/feature.py",
+                        "TargetContent": "a",
+                        "ReplacementContent": "b",
+                    },
                 },
             }
             code, result = self.run_guard(payload)
