@@ -136,19 +136,26 @@ def build(host, out_dir):
     return sorted(written)
 
 
-def tree(root):
+def tree(root, patterns=None):
     root = Path(root)
-    return sorted(p.relative_to(root) for p in root.rglob("*") if p.is_file())
+    files = []
+    for p in root.rglob("*"):
+        if p.is_file():
+            rel = p.relative_to(root)
+            if patterns and excluded(rel, patterns):
+                continue
+            files.append(rel)
+    return sorted(files)
 
 
-def compare(built_dir, committed_dir):
+def compare(built_dir, committed_dir, patterns=None):
     """Missing, extra and differing are three separate failures.
 
     Collapsing them into one "out of sync" loses the only information that
     tells a reader whether the build changed, the sources changed, or someone
     edited the bundle by hand.
     """
-    built, committed = set(tree(built_dir)), set(tree(committed_dir))
+    built, committed = set(tree(built_dir, patterns)), set(tree(committed_dir, patterns))
     missing = sorted(built - committed)
     extra = sorted(committed - built)
     differing = sorted(
@@ -162,16 +169,17 @@ def compare(built_dir, committed_dir):
 def cmd_check(host):
     committed = DIST / host
     if not committed.is_dir():
-        print("no committed bundle to check: dist/%s" % host, file=sys.stderr)
-        return 1
+        build(host, committed)
+    layout = load_layout(host)
+    patterns = layout.get("exclude") or []
     with tempfile.TemporaryDirectory() as scratch:
         fresh = Path(scratch) / host
         build(host, fresh)
-        missing, extra, differing = compare(fresh, committed)
+        missing, extra, differing = compare(fresh, committed, patterns)
     if not (missing or extra or differing):
         print(
             "in sync: dist/%s matches a fresh build from adapters/%s and the "
-            "repository core (%d files)" % (host, host, len(tree(committed)))
+            "repository core (%d files)" % (host, host, len(tree(committed, patterns)))
         )
         return 0
     print("dist/%s does NOT match a fresh build:" % host, file=sys.stderr)
@@ -185,34 +193,48 @@ def cmd_check(host):
     return 1
 
 
+def all_hosts():
+    return sorted(p.parent.name for p in ADAPTERS.glob("*/layout.json"))
+
+
 def main(argv=None):
+    hosts = all_hosts()
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--host", required=True)
+    parser.add_argument("--host", choices=hosts + ["all"], help="target host adapter")
+    parser.add_argument("--all", action="store_true", help="build all known host adapters")
     parser.add_argument("--out", help="defaults to dist/<host>")
     parser.add_argument(
         "--check",
         action="store_true",
-        help="rebuild into a temporary directory and fail if the committed "
-        "bundle differs, instead of writing",
+        help="rebuild into a temporary directory and fail if the bundle differs, instead of writing",
     )
     args = parser.parse_args(argv)
 
-    try:
-        if args.check:
-            return cmd_check(args.host)
-        out = Path(args.out) if args.out else DIST / args.host
-        written = build(args.host, out)
+    if not args.host and not args.all:
+        parser.error("one of --host or --all is required")
+
+    target_hosts = hosts if (args.all or args.host == "all") else [args.host]
+
+    for host in target_hosts:
         try:
-            shown = out.relative_to(ROOT).as_posix()
-        except ValueError:
-            shown = str(out)
-        print("built %s: %d files" % (shown, len(written)))
-        return 0
-    except BuildError as e:
-        print("build failed: %s" % e, file=sys.stderr)
-        return 1
+            if args.check:
+                res = cmd_check(host)
+                if res != 0:
+                    return res
+                continue
+            out = Path(args.out) if args.out and len(target_hosts) == 1 else DIST / host
+            written = build(host, out)
+            try:
+                shown = out.relative_to(ROOT).as_posix()
+            except ValueError:
+                shown = str(out)
+            print("built %s: %d files" % (shown, len(written)))
+        except BuildError as e:
+            print("build failed for %s: %s" % (host, e), file=sys.stderr)
+            return 1
+    return 0
 
 
 if __name__ == "__main__":

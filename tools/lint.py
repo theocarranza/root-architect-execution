@@ -103,14 +103,13 @@ def main(argv=None):
         if code != 0:
             return code
 
-    # If --fix was requested, rebuild host bundles to ensure dist/ remains in sync
+    # If --fix was requested, rebuild host bundles
     if args.fix:
         build_script = ROOT / "scripts" / "build_adapter.py"
-        for host in ("claude-code", "codex", "gemini"):
-            res = subprocess.run([sys.executable, str(build_script), "--host", host], cwd=str(ROOT))
-            if res.returncode != 0:
-                print("failed rebuilding bundle for %s" % host, file=sys.stderr)
-                return res.returncode
+        res = subprocess.run([sys.executable, str(build_script), "--all"], cwd=str(ROOT))
+        if res.returncode != 0:
+            print("failed rebuilding host adapter bundles", file=sys.stderr)
+            return res.returncode
 
     return 0
 

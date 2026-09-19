@@ -63,14 +63,9 @@ jobs:
           python3 scripts/render_agents.py --host cursor --check
           python3 scripts/render_agents.py --host gemini --check
 
-      # The bundle gate, not just the agent files. A rebuild into a temp
-      # directory and a byte comparison, because a hash manifest cannot tell a
-      # stale bundle from a current one.
-      - name: Built bundles match their sources
-        run: |
-          python3 scripts/build_adapter.py --host claude-code --check
-          python3 scripts/build_adapter.py --host codex --check
-          python3 scripts/build_adapter.py --host gemini --check
+      # The bundle gate: build and verify all adapter bundles.
+      - name: Build and check adapter bundles
+        run: python3 scripts/build_adapter.py --all --check
 
       # What each host actually offers, and whether every role depends only
       # on capabilities that host declares AND sources. An unsourced claim
@@ -98,6 +93,9 @@ jobs:
 
       - name: Install the Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
+
+      - name: Build Claude Code bundle
+        run: python3 scripts/build_adapter.py --host claude-code
 
       # The BUNDLE, not the repository root. Since ADR 0001 step 3 the two
       # manifests live in adapters/claude-code/ and the root is no longer a

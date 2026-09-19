@@ -14,6 +14,10 @@
     "schemas/": "schemas/",
     "scripts/": "scripts/",
     "adapters/gemini/skill.template.md": "skills/root-architect-execution/SKILL.md",
+    "adapters/gemini/hooks/hooks.json": "hooks.json",
+    "adapters/gemini/hooks/gemini_session_bootstrap.py": "hooks/gemini_session_bootstrap.py",
+    "adapters/gemini/hooks/gemini_subagent_guard.py": "hooks/gemini_subagent_guard.py",
+    "adapters/gemini/hooks/root_write_guard.py": "hooks/root_write_guard.py",
     "SKILL.md": "SKILL.md"
   },
   "exclude": ["**/__pycache__/**", "**/*.pyc"]

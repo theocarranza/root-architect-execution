@@ -57,13 +57,11 @@ for host in claude-code codex cursor gemini; do
     fi
 done
 
-# 7. Distribution bundle drift check
-echo "--> Checking built distribution bundles for drift..."
-for host in claude-code codex gemini; do
-    if ! "$PYTHON" "$REPO_ROOT/scripts/build_adapter.py" --host "$host" --check; then
-        echo "ERROR: Built bundle dist/$host is out of sync. Rebuild with: python3 scripts/build_adapter.py --host $host" >&2
-        exit 1
-    fi
-done
+# 7. Distribution bundle build check
+echo "--> Checking that distribution bundles build cleanly..."
+if ! "$PYTHON" "$REPO_ROOT/scripts/build_adapter.py" --all --check; then
+    echo "ERROR: Adapter bundle build check failed." >&2
+    exit 1
+fi
 
 echo "==> Pre-commit quality gate passed!"

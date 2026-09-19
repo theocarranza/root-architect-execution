@@ -54,6 +54,14 @@ import smoke_install  # noqa: E402
 import validate_interfaces  # noqa: E402
 
 
+def setUpModule():
+    """Ensure all distribution bundles exist for tests that examine dist/."""
+    for host in build_adapter.all_hosts():
+        bundle = ROOT / "dist" / host
+        if not bundle.is_dir():
+            build_adapter.build(host, bundle)
+
+
 @contextlib.contextmanager
 def mock_adapters(directory):
     """Point build_adapter at a scratch adapters/ tree.
@@ -460,8 +468,8 @@ class RenderTests(unittest.TestCase):
 
     def test_empty_mapped_allow_list_never_produces_allowed_period(self):
         """Test requirement (a): no generated file contains the malformed 'Allowed: .' string."""
-        # Check dist/ directory
-        for toml_file in (ROOT / "dist" / "codex").glob("*.toml"):
+        # Check codex agents directory
+        for toml_file in (ROOT / "adapters" / "codex" / "agents").glob("*.toml"):
             text = toml_file.read_text(encoding="utf-8")
             self.assertNotIn(
                 "Allowed: .", text, f"Found malformed 'Allowed: .' in {toml_file.name}"
@@ -902,7 +910,9 @@ class AdapterBuildTests(unittest.TestCase):
         roles = sorted(p.stem for p in (ROOT / "roles").glob("*.json"))
         self.assertEqual(want["agents"], roles)
         self.assertEqual(
-            want["hooks"], ["PreToolUse"], "read from hooks.json's events, not its top-level key"
+            want["hooks"],
+            ["PreToolUse", "SessionStart"],
+            "read from hooks.json's events, not its top-level key",
         )
 
     def test_hook_events_come_from_the_events_not_the_wrapper(self):
@@ -2838,7 +2848,7 @@ class AgentInterfaceTests(unittest.TestCase):
         missing one: it looks generated and current.
         """
         tree = self.sandbox()
-        stale = tree / "dist/cursor"
+        stale = tree / "adapters/cursor/agents"
         stale.mkdir(parents=True, exist_ok=True)
         (stale / "orchestrator.md").write_text("stale\n", encoding="utf-8")
 
@@ -3082,7 +3092,7 @@ class RootAgentTests(unittest.TestCase):
         self.assertFalse(enforced)
         self.assertIn("maps no tool name to delegation", note)
 
-        generated = (ROOT / "dist/cursor/root-architect.md").read_text(encoding="utf-8")
+        generated = (ROOT / "adapters/cursor/agents/root-architect.md").read_text(encoding="utf-8")
         self.assertIn("maps no tool name to delegation", generated)
 
     # --- the startup prompt -------------------------------------------------
@@ -3272,6 +3282,19 @@ class PreflightTests(unittest.TestCase):
         with self.assertRaises(root_preflight.PreflightError) as caught:
             self.check(agent_types=())
         self.assertIn("cannot dispatch", str(caught.exception))
+
+    def test_root_holding_define_subagent_is_refused(self):
+        """Root must never hold define_subagent."""
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            self.check(tools=("Agent", "define_subagent"))
+        self.assertIn("root holds 'define_subagent'", str(caught.exception))
+
+    def test_gemini_auto_interrogation_preflight(self):
+        """Gemini runtime auto-interrogation verifies boundary and hooks."""
+        record = root_preflight.run(self.ws, self.RUN, host_name="gemini", auto=True)
+        self.assertTrue(record["passed"])
+        self.assertEqual(record["observed"]["agent_types"], ["orchestrator"])
+        self.assertNotIn("define_subagent", record["observed"]["tools"])
 
     def test_a_refusal_is_recorded_too(self):
         """A refused run and an unchecked one must not look the same after."""

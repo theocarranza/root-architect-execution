@@ -67,7 +67,7 @@
       "template": null,
       "type_template": null,
       "separator": null,
-      "verified": "Gemini does not support type-restricted delegation syntax inside tools allowlist; restrictions are prompt-enforced."
+      "verified": "Gemini does not support type-restricted delegation syntax inside tools allowlist; restrictions are hardware-enforced via PreToolUse hooks (gemini_subagent_guard.py)."
     },
     "initial_prompt": {
       "supported": false,

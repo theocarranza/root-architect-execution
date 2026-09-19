@@ -9,7 +9,7 @@ flowchart LR
   PROSE["references/agents/*.md<br/>the role itself"] -.->|"referenced, never copied"| GEN
   GEN --> A["adapters/claude-code/agents/*.md"]
   GEN --> B["adapters/codex/agents/*.toml"]
-  GEN --> C["dist/cursor/*.md"]
+  GEN --> C["adapters/cursor/agents/*.md"]
   A & B --> BUILD["scripts/build_adapter.py"] --> DIST["dist/&lt;host&gt;/ — installable"]
   GEN --> D["Enforcement disclosures"]
 ```
@@ -21,11 +21,11 @@ checkpoint quotes.
 
 ## Roles
 
-| Role | Mutation class | Model / effort default | File |
-| --- | --- | --- | --- |
-| Implementer | write-scoped | cheap / low | [impl-executor.md](impl-executor.md) |
-| Plan-compliance validator | read-only, no shell | cheap / medium | [spec-validator.md](spec-validator.md) |
-| Quality validator | read and run | cheap / medium | [quality-validator.md](quality-validator.md) |
+| Role                      | Mutation class      | Model / effort default | File                                         |
+| ------------------------- | ------------------- | ---------------------- | -------------------------------------------- |
+| Implementer               | write-scoped        | cheap / low            | [impl-executor.md](impl-executor.md)         |
+| Plan-compliance validator | read-only, no shell | cheap / medium         | [spec-validator.md](spec-validator.md)       |
+| Quality validator         | read and run        | cheap / medium         | [quality-validator.md](quality-validator.md) |
 
 Spec runs first. Quality runs only after spec passes, on a **different** fresh
 agent. Combining them is a red flag, and `check_return.py` rejects a verdict
@@ -60,18 +60,18 @@ generated file that no longer matches its manifest.
 Generated from `hosts/*.json`. Each row states how the host spells a capability
 and, where it cannot, what the disclosure says instead.
 
-| | Claude Code | Cursor | Codex |
-| --- | --- | --- | --- |
-| Verified | **2026-09-07** | 2026-09-04, inherited | 2026-09-04, inherited |
-| Location | `.claude/agents/*.md` | `.cursor/agents/*.md` | `.codex/agents/*.toml` |
-| Format | Markdown + YAML | Markdown + YAML | TOML |
-| Explicit model | `model:` | `model:` | `model =` |
-| Model default | **inherits** | **inherits** | **inherits** |
-| Reasoning effort | `effort:` (low…max) | inside the model string, `id[effort=high]` | `model_reasoning_effort` |
-| Tool allowlist | `tools:` | not expressible | not expressible |
-| Tool denylist | `disallowedTools:` | not expressible | not expressible |
-| Read-only enforced | yes, by omitting write tools | `readonly: true` | `sandbox_mode = "read-only"` |
-| Per-agent hooks | `hooks:` | not expressible | not expressible |
+|                    | Claude Code                  | Cursor                                     | Codex                        |
+| ------------------ | ---------------------------- | ------------------------------------------ | ---------------------------- |
+| Verified           | **2026-09-07**               | 2026-09-04, inherited                      | 2026-09-04, inherited        |
+| Location           | `.claude/agents/*.md`        | `.cursor/agents/*.md`                      | `.codex/agents/*.toml`       |
+| Format             | Markdown + YAML              | Markdown + YAML                            | TOML                         |
+| Explicit model     | `model:`                     | `model:`                                   | `model =`                    |
+| Model default      | **inherits**                 | **inherits**                               | **inherits**                 |
+| Reasoning effort   | `effort:` (low…max)          | inside the model string, `id[effort=high]` | `model_reasoning_effort`     |
+| Tool allowlist     | `tools:`                     | not expressible                            | not expressible              |
+| Tool denylist      | `disallowedTools:`           | not expressible                            | not expressible              |
+| Read-only enforced | yes, by omitting write tools | `readonly: true`                           | `sandbox_mode = "read-only"` |
+| Per-agent hooks    | `hooks:`                     | not expressible                            | not expressible              |
 
 Two consequences the loop must respect.
 
@@ -79,7 +79,7 @@ Two consequences the loop must respect.
 forbidden: without an explicit `model`, a cheap worker silently costs what root
 costs. Every generated file sets it.
 
-**Reasoning effort *is* settable on Claude Code.** The previous revision of this
+**Reasoning effort _is_ settable on Claude Code.** The previous revision of this
 matrix asserted the opposite and told root to record `not settable on this host`
 on a host that had supported `effort:` for releases — so every checkpoint written
 under it understated what the run actually applied. That is the failure the
