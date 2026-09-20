@@ -16,28 +16,51 @@ class RuntimeCapabilityTests(unittest.TestCase):
 
     def test_documentation_only_is_not_host_enforcement(self):
         problems = validate_interfaces.capability_semantic_errors(
-            {"availability": "supported", "enforcement": "host", "execution_surface": "plugin",
-             "evidence": [{"kind": "documentation", "reference": "vendor docs"}]}, "readonly"
+            {
+                "availability": "supported",
+                "enforcement": "host",
+                "execution_surface": "plugin",
+                "evidence": [{"kind": "documentation", "reference": "vendor docs"}],
+            },
+            "readonly",
         )
         self.assertTrue(problems)
+
     def test_live_host_evidence_can_support_host_enforcement(self):
         problems = validate_interfaces.capability_semantic_errors(
-            {"availability": "supported", "enforcement": "host", "execution_surface": "session",
-             "evidence": [{"kind": "live-observation", "reference": "probe", "surface": "session"}]}, "readonly"
+            {
+                "availability": "supported",
+                "enforcement": "host",
+                "execution_surface": "session",
+                "evidence": [
+                    {"kind": "live-observation", "reference": "probe", "surface": "session"}
+                ],
+            },
+            "readonly",
         )
         self.assertEqual([], problems)
 
     def test_contradictory_evidence_is_rejected(self):
         problems = validate_interfaces.capability_semantic_errors(
-            {"availability": "supported", "enforcement": "host", "execution_surface": "session",
-             "evidence": [{"kind": "live-observation", "reference": "yes", "surface": "session"},
-                          {"kind": "contradiction", "reference": "no", "surface": "session"}]}, "readonly"
+            {
+                "availability": "supported",
+                "enforcement": "host",
+                "execution_surface": "session",
+                "evidence": [
+                    {"kind": "live-observation", "reference": "yes", "surface": "session"},
+                    {"kind": "contradiction", "reference": "no", "surface": "session"},
+                ],
+            },
+            "readonly",
         )
         self.assertTrue(problems)
 
     def test_unknown_nesting_is_not_supported(self):
-        self.assertFalse(validate_interfaces.can_depend_on_capability(
-            {"availability": "unknown", "enforcement": "unknown"}))
+        self.assertFalse(
+            validate_interfaces.can_depend_on_capability(
+                {"availability": "unknown", "enforcement": "unknown"}
+            )
+        )
 
     def test_alias_collapse_is_disclosed(self):
         aliases = {"cheap": "same", "mid": "same", "strong": "strong"}
@@ -45,7 +68,14 @@ class RuntimeCapabilityTests(unittest.TestCase):
 
     def test_plugin_evidence_does_not_prove_session(self):
         problems = validate_interfaces.capability_semantic_errors(
-            {"availability": "supported", "enforcement": "host", "execution_surface": "session",
-             "evidence": [{"kind": "live-observation", "reference": "plugin run", "surface": "plugin"}]}, "readonly"
+            {
+                "availability": "supported",
+                "enforcement": "host",
+                "execution_surface": "session",
+                "evidence": [
+                    {"kind": "live-observation", "reference": "plugin run", "surface": "plugin"}
+                ],
+            },
+            "readonly",
         )
         self.assertTrue(problems)

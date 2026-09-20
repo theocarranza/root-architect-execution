@@ -218,10 +218,14 @@ def _admission_from_args(args):
     except (OSError, ValueError) as exc:
         raise JobQueueError("cannot read selected transport capability evidence: %s" % exc)
     return {
-        "run_id": args.run_id, "host_id": args.host, "workspace": str(Path(args.workspace).resolve()),
+        "run_id": args.run_id,
+        "host_id": args.host,
+        "workspace": str(Path(args.workspace).resolve()),
         "workspace_fingerprint": args.workspace_fingerprint,
-        "controller_session_id": args.controller_session_id, "catalog_digest": args.catalog_digest,
-        "configuration_fingerprint": args.configuration_digest, "capability_evidence": evidence,
+        "controller_session_id": args.controller_session_id,
+        "catalog_digest": args.catalog_digest,
+        "configuration_fingerprint": args.configuration_digest,
+        "capability_evidence": evidence,
     }
 
 
@@ -254,7 +258,14 @@ def cmd_next(args):
 
 def cmd_mark(args):
     try:
-        task = mark(args.workspace, args.run_id, args.task, args.state, args.envelope, _admission_from_args(args))
+        task = mark(
+            args.workspace,
+            args.run_id,
+            args.task,
+            args.state,
+            args.envelope,
+            _admission_from_args(args),
+        )
     except JobQueueError as exc:
         return _fail(str(exc))
     print("%s -> %s" % (task["name"], task["state"]))

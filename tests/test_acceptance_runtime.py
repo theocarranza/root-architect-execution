@@ -24,8 +24,15 @@ class AcceptanceRuntimeTests(unittest.TestCase):
 
     def test_live_probe_refuses_unenforceable_limits_without_launching(self):
         result = self.invoke(
-            "--host", "codex", "--scenario", "capability-probe", "--require-live",
-            "--max-seconds", "300", "--max-tokens", "12000",
+            "--host",
+            "codex",
+            "--scenario",
+            "capability-probe",
+            "--require-live",
+            "--max-seconds",
+            "300",
+            "--max-tokens",
+            "12000",
         )
         self.assertEqual(2, result.returncode, result.stderr)
         record = json.loads(result.stdout)
@@ -41,20 +48,38 @@ class AcceptanceRuntimeTests(unittest.TestCase):
 
     def test_invalid_or_missing_required_controls_are_rejected(self):
         invalid_host = self.invoke(
-            "--host", "claude-code", "--scenario", "capability-probe", "--require-live",
-            "--max-seconds", "300", "--max-tokens", "12000",
+            "--host",
+            "claude-code",
+            "--scenario",
+            "capability-probe",
+            "--require-live",
+            "--max-seconds",
+            "300",
+            "--max-tokens",
+            "12000",
         )
         missing_limit = self.invoke(
-            "--host", "codex", "--scenario", "capability-probe", "--require-live",
-            "--max-seconds", "300",
+            "--host",
+            "codex",
+            "--scenario",
+            "capability-probe",
+            "--require-live",
+            "--max-seconds",
+            "300",
         )
         self.assertEqual(2, invalid_host.returncode)
         self.assertEqual(2, missing_limit.returncode)
 
     def test_offline_probe_records_not_run_status_and_safe_facts_only(self):
         result = self.invoke(
-            "--host", "codex", "--scenario", "capability-probe",
-            "--max-seconds", "300", "--max-tokens", "12000",
+            "--host",
+            "codex",
+            "--scenario",
+            "capability-probe",
+            "--max-seconds",
+            "300",
+            "--max-tokens",
+            "12000",
         )
         self.assertEqual(0, result.returncode, result.stderr)
         record = json.loads(result.stdout)

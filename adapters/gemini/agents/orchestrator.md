@@ -18,17 +18,9 @@ Return exactly one fenced `json` block in this shape, and nothing else. Root val
 
 ```json
 {
+  "schema_version": 2,
   "run_id": "<text>",
   "outcome": "accepted|rejected|blocked|abandoned",
-  "dispatched": [
-    {
-      "worker": "<text>",
-      "envelopes": [
-        "<text>"
-      ]
-    }
-  ],
-  "envelope_count": "<n>",
   "rationale": "<text>"
 }
 ```

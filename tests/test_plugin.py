@@ -35,16 +35,16 @@ sys.path.insert(0, str(SCRIPTS))
 # by path rather than imported off sys.path. Putting adapters/codex/ on the
 # path would also make every other host's mechanics importable by bare name,
 # which is the coupling the adapter directories exist to prevent.
-import mailbox
+import mailbox  # noqa: E402
 
-import build_adapter
-import job_queue
-import render_agents
-import root_preflight
-import smoke_install
-import validate_interfaces
-from dispatch_state import DispatchStateError
-from jsonschema_mini import Validator
+import build_adapter  # noqa: E402
+import job_queue  # noqa: E402
+import render_agents  # noqa: E402
+import root_preflight  # noqa: E402
+import smoke_install  # noqa: E402
+import validate_interfaces  # noqa: E402
+from dispatch_state import DispatchStateError  # noqa: E402
+from jsonschema_mini import Validator  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location(
     "codex_install", ROOT / "adapters" / "codex" / "install.py"

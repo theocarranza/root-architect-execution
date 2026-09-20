@@ -19,8 +19,12 @@ class RuntimeServiceTests(unittest.TestCase):
 
     def test_role_session_and_environment_are_not_authentication(self):
         service = RuntimeService(Path(tempfile.mkdtemp()) / "state")
-        for supplied in ({"role": "controller"}, {"persisted_by": "orchestrator"},
-                         {"controller_session_id": "forged"}, {"caller": "root"}):
+        for supplied in (
+            {"role": "controller"},
+            {"persisted_by": "orchestrator"},
+            {"controller_session_id": "forged"},
+            {"caller": "root"},
+        ):
             with self.subTest(supplied=supplied):
                 self.assertEqual("unsupported_boundary", service.privileged(supplied)["status"])
 

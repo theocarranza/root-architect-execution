@@ -29,8 +29,11 @@ def validate_result(operation, result):
     if not isinstance(result, dict):
         return ["%s result must be an object" % operation]
     if result.get("status") == "unsupported_host_capability":
-        return ([] if result.get("capability") == operation else
-                ["unsupported result must name capability %s" % operation])
+        return (
+            []
+            if result.get("capability") == operation
+            else ["unsupported result must name capability %s" % operation]
+        )
     if operation == "events":
         allowed = {"status", "events", "next_cursor"}
         unexpected = set(result) - allowed
@@ -50,9 +53,14 @@ def validate_result(operation, result):
                 errors.append("events[%d].source must be explicit" % index)
             if event.get("child") not in {"host", "adapter", "unknown"}:
                 errors.append("events[%d].child must be explicit" % index)
-            if not isinstance(event.get("adapter_dedup_key"), str) or not event["adapter_dedup_key"]:
+            if (
+                not isinstance(event.get("adapter_dedup_key"), str)
+                or not event["adapter_dedup_key"]
+            ):
                 errors.append("events[%d].adapter_dedup_key is required" % index)
-            if "provider_event_id" in event and not isinstance(event["provider_event_id"], (str, type(None))):
+            if "provider_event_id" in event and not isinstance(
+                event["provider_event_id"], (str, type(None))
+            ):
                 errors.append("events[%d].provider_event_id must be string-or-null" % index)
         return errors
     if result.get("status") != "ok":
@@ -60,9 +68,7 @@ def validate_result(operation, result):
     errors = []
     for field, expected_type in SUCCESS_FIELDS[operation].items():
         value = result.get(field)
-        if not isinstance(value, expected_type) or (
-            expected_type is str and not value
-        ):
+        if not isinstance(value, expected_type) or (expected_type is str and not value):
             errors.append("%s result requires %s" % (operation, field))
     return errors
 
@@ -80,8 +86,11 @@ class HostRuntimeBridge:
         try:
             result = handler(*args)
         except Exception as exc:  # adapter errors are data for the controller
-            return {"status": "invalid_host_result", "capability": operation,
-                    "error": "%s: %s" % (type(exc).__name__, exc)}
+            return {
+                "status": "invalid_host_result",
+                "capability": operation,
+                "error": "%s: %s" % (type(exc).__name__, exc),
+            }
         if validate_result(operation, result):
             return {"status": "invalid_host_result", "capability": operation}
         return result

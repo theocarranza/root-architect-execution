@@ -22,11 +22,17 @@ from runtime_service import RuntimeService  # noqa: E402
 
 def brief():
     return {
-        "task": "Blocked compatibility task", "attempt": 1, "max_attempts": 3,
-        "role": "implementer", "model": "cheap", "effort": "low",
-        "read_paths": ["scripts"], "write_paths": ["scripts"],
+        "task": "Blocked compatibility task",
+        "attempt": 1,
+        "max_attempts": 3,
+        "role": "implementer",
+        "model": "cheap",
+        "effort": "low",
+        "read_paths": ["scripts"],
+        "write_paths": ["scripts"],
         "acceptance": [{"command": "python3 -m unittest", "expect": "pass"}],
-        "constraints": ["Task-owned scratch workspace only."], "owner_owned_paths": [],
+        "constraints": ["Task-owned scratch workspace only."],
+        "owner_owned_paths": [],
         "expected_result": "An authenticated controller service is required.",
     }
 
@@ -38,14 +44,23 @@ class RuntimeAdmissionTests(unittest.TestCase):
         self.workspace = Path(tempfile.mkdtemp(prefix="runtime-admission-"))
         self.addCleanup(shutil.rmtree, self.workspace, ignore_errors=True)
         self.context = {
-            "run_id": self.RUN, "host_id": "codex", "workspace": str(self.workspace.resolve()),
-            "workspace_fingerprint": "workspace-digest", "controller_session_id": "controller-session-1",
-            "catalog_digest": "catalog-digest", "configuration_fingerprint": "config-digest",
+            "run_id": self.RUN,
+            "host_id": "codex",
+            "workspace": str(self.workspace.resolve()),
+            "workspace_fingerprint": "workspace-digest",
+            "controller_session_id": "controller-session-1",
+            "catalog_digest": "catalog-digest",
+            "configuration_fingerprint": "config-digest",
             "capability_evidence": {
-                "source": "selected_transport", "transport_id": "codex-app-server-session-1",
+                "source": "selected_transport",
+                "transport_id": "codex-app-server-session-1",
                 "observed_at": datetime.now(timezone.utc).isoformat(),
-                "capabilities": {"delegation_available": True, "controller_selection_enforced": True,
-                    "registered_agents": True, "hook_registration_enforced": True},
+                "capabilities": {
+                    "delegation_available": True,
+                    "controller_selection_enforced": True,
+                    "registered_agents": True,
+                    "hook_registration_enforced": True,
+                },
             },
         }
 
@@ -65,15 +80,33 @@ class RuntimeAdmissionTests(unittest.TestCase):
         evidence_path = self.workspace / "evidence.json"
         brief_path.write_text(json.dumps(brief()))
         evidence_path.write_text(json.dumps(self.context["capability_evidence"]))
-        result = subprocess.run([
-            sys.executable, str(SCRIPTS / "dispatch_state.py"), "open", "--workspace", str(self.workspace),
-            "--run-id", self.RUN, "--brief", str(brief_path), "--host", self.context["host_id"],
-            "--workspace-fingerprint", self.context["workspace_fingerprint"],
-            "--controller-session-id", self.context["controller_session_id"],
-            "--catalog-digest", self.context["catalog_digest"],
-            "--configuration-digest", self.context["configuration_fingerprint"],
-            "--capability-evidence", str(evidence_path),
-        ], capture_output=True, text=True)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "dispatch_state.py"),
+                "open",
+                "--workspace",
+                str(self.workspace),
+                "--run-id",
+                self.RUN,
+                "--brief",
+                str(brief_path),
+                "--host",
+                self.context["host_id"],
+                "--workspace-fingerprint",
+                self.context["workspace_fingerprint"],
+                "--controller-session-id",
+                self.context["controller_session_id"],
+                "--catalog-digest",
+                self.context["catalog_digest"],
+                "--configuration-digest",
+                self.context["configuration_fingerprint"],
+                "--capability-evidence",
+                str(evidence_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
         self.assertNotEqual(0, result.returncode)
         self.assertIn("unsupported_boundary", result.stderr)
 
@@ -91,10 +124,22 @@ class RuntimeAdmissionTests(unittest.TestCase):
         with self.assertRaises(root_preflight.PreflightError) as caught:
             root_preflight.run(self.workspace, self.RUN, observed, host_name="codex")
         self.assertIn("required delegation", str(caught.exception))
-        bad = dict(self.context, capability_evidence={"source": "model_observation", "transport_id": "claimed",
-            "observed_at": datetime.now(timezone.utc).isoformat(), "hook_file": "hooks.json", "agent_file": "orchestrator.md",
-            "capabilities": {"delegation_available": True, "controller_selection_enforced": True,
-                "registered_agents": True, "hook_registration_enforced": True}})
+        bad = dict(
+            self.context,
+            capability_evidence={
+                "source": "model_observation",
+                "transport_id": "claimed",
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "hook_file": "hooks.json",
+                "agent_file": "orchestrator.md",
+                "capabilities": {
+                    "delegation_available": True,
+                    "controller_selection_enforced": True,
+                    "registered_agents": True,
+                    "hook_registration_enforced": True,
+                },
+            },
+        )
         with self.assertRaises(runtime_policy.AdmissionError):
             runtime_policy.validate_context(bad)
 

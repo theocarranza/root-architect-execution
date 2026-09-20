@@ -82,7 +82,8 @@ class RuntimeContractTests(unittest.TestCase):
 
     def test_envelope_cannot_satisfy_another_attempt(self):
         errors = runtime_contract.validate_answer_for_attempt(
-            envelope(), {"run_id": "run-1", "task_id": "task-1", "attempt_id": "attempt-2"},
+            envelope(),
+            {"run_id": "run-1", "task_id": "task-1", "attempt_id": "attempt-2"},
             "controller:local-1",
         )
         self.assert_invalid(errors)
@@ -121,33 +122,49 @@ class RuntimeContractTests(unittest.TestCase):
             self.assert_invalid(runtime_contract.validate_attempt_transition(previous, current))
 
     def test_envelope_rejects_wrong_route(self):
-        self.assert_invalid(runtime_contract.validate_envelope(
-            envelope(**{"from": "worker:implementer", "to": "root"}), "controller:local-1"
-        ))
+        self.assert_invalid(
+            runtime_contract.validate_envelope(
+                envelope(**{"from": "worker:implementer", "to": "root"}), "controller:local-1"
+            )
+        )
 
     def test_only_run_level_envelopes_can_have_null_task_and_attempt(self):
-        self.assert_invalid(runtime_contract.validate_envelope(
-            envelope(task_id=None, attempt_id=None), "controller:local-1"
-        ))
+        self.assert_invalid(
+            runtime_contract.validate_envelope(
+                envelope(task_id=None, attempt_id=None), "controller:local-1"
+            )
+        )
         lifecycle = envelope(
-            task_id=None, attempt_id=None, kind="lifecycle", reply_to=None,
+            task_id=None,
+            attempt_id=None,
+            kind="lifecycle",
+            reply_to=None,
             **{"from": "controller:local-1", "to": "orchestrator"},
         )
         self.assertEqual([], runtime_contract.validate_envelope(lifecycle, "controller:local-1"))
 
     def test_controller_capture_does_not_change_business_authorship(self):
         self.assertEqual([], runtime_contract.validate_envelope(envelope(), "controller:local-1"))
-        self.assert_invalid(runtime_contract.validate_envelope(
-            envelope(captured_by="orchestrator"), "controller:local-1"
-        ))
-        self.assert_invalid(runtime_contract.validate_envelope(
-            envelope(captured_by="controller:forged"), "controller:local-1"
-        ))
+        self.assert_invalid(
+            runtime_contract.validate_envelope(
+                envelope(captured_by="orchestrator"), "controller:local-1"
+            )
+        )
+        self.assert_invalid(
+            runtime_contract.validate_envelope(
+                envelope(captured_by="controller:forged"), "controller:local-1"
+            )
+        )
 
     def test_legacy_v1_readers_are_explicit_and_remain_accepted(self):
         legacy = {
-            "run_id": "20260920-run", "seq": 1, "kind": "report", "from": "worker:implementer",
-            "to": "orchestrator", "persisted_by": "orchestrator", "created_at": "now",
+            "run_id": "20260920-run",
+            "seq": 1,
+            "kind": "report",
+            "from": "worker:implementer",
+            "to": "orchestrator",
+            "persisted_by": "orchestrator",
+            "created_at": "now",
             "body_sha256": "a" * 64,
         }
         self.assertEqual([], runtime_contract.read_v1_envelope(legacy))
@@ -155,17 +172,33 @@ class RuntimeContractTests(unittest.TestCase):
 
     def test_v2_outcomes_use_evidence_references_not_counts_or_filenames(self):
         accepted = {
-            "schema_version": 2, "run_id": "run-1", "outcome": "accepted", "rationale": "validated",
-            "validated_attempt_refs": ["attempt-1"], "orchestrator_decision_refs": ["decision-1"],
+            "schema_version": 2,
+            "run_id": "run-1",
+            "outcome": "accepted",
+            "rationale": "validated",
+            "validated_attempt_refs": ["attempt-1"],
+            "orchestrator_decision_refs": ["decision-1"],
         }
         self.assertEqual([], runtime_contract.validate_outcome(accepted))
-        self.assert_invalid(runtime_contract.validate_outcome({
-            "schema_version": 2, "run_id": "run-1", "outcome": "accepted", "rationale": "counted",
-            "dispatched": [], "envelope_count": 1,
-        }))
+        self.assert_invalid(
+            runtime_contract.validate_outcome(
+                {
+                    "schema_version": 2,
+                    "run_id": "run-1",
+                    "outcome": "accepted",
+                    "rationale": "counted",
+                    "dispatched": [],
+                    "envelope_count": 1,
+                }
+            )
+        )
         blocked = {
-            "schema_version": 2, "run_id": "run-1", "outcome": "blocked", "rationale": "waiting",
-            "blocked_reason": "need operator input", "question_or_failure_refs": ["env-question-1"],
+            "schema_version": 2,
+            "run_id": "run-1",
+            "outcome": "blocked",
+            "rationale": "waiting",
+            "blocked_reason": "need operator input",
+            "question_or_failure_refs": ["env-question-1"],
         }
         self.assertEqual([], runtime_contract.validate_outcome(blocked))
         missing_evidence = copy.deepcopy(blocked)

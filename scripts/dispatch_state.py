@@ -174,12 +174,18 @@ def _admission_from_args(args):
     try:
         evidence = json.loads(Path(args.capability_evidence).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise runtime_policy.AdmissionError("admission blocked: cannot read selected transport capability evidence (%s)" % exc)
+        raise runtime_policy.AdmissionError(
+            "admission blocked: cannot read selected transport capability evidence (%s)" % exc
+        )
     return {
-        "run_id": args.run_id, "host_id": args.host, "workspace": str(Path(args.workspace).resolve()),
+        "run_id": args.run_id,
+        "host_id": args.host,
+        "workspace": str(Path(args.workspace).resolve()),
         "workspace_fingerprint": args.workspace_fingerprint,
-        "controller_session_id": args.controller_session_id, "catalog_digest": args.catalog_digest,
-        "configuration_fingerprint": args.configuration_digest, "capability_evidence": evidence,
+        "controller_session_id": args.controller_session_id,
+        "catalog_digest": args.catalog_digest,
+        "configuration_fingerprint": args.configuration_digest,
+        "capability_evidence": evidence,
     }
 
 

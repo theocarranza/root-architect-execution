@@ -9,17 +9,9 @@ Read <skill_root>/references/agents/orchestrator.md before doing anything. It is
 Return exactly one fenced json block in this shape, and nothing else. Placeholders show the type; a|b means pick one. The full contract is <skill_root>/schemas/orchestrator-outcome.schema.json.
 
 {
+  "schema_version": 2,
   "run_id": "<text>",
   "outcome": "accepted|rejected|blocked|abandoned",
-  "dispatched": [
-    {
-      "worker": "<text>",
-      "envelopes": [
-        "<text>"
-      ]
-    }
-  ],
-  "envelope_count": "<n>",
   "rationale": "<text>"
 }
 

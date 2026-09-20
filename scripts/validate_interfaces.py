@@ -83,9 +83,13 @@ def capability_semantic_errors(claim, name="capability"):
         if not live:
             errors.append("%s: host enforcement requires live-observation evidence" % name)
         elif not any(item.get("surface") == surface for item in live):
-            errors.append("%s: host enforcement evidence is for a different execution surface" % name)
+            errors.append(
+                "%s: host enforcement evidence is for a different execution surface" % name
+            )
     if name in {"readonly", "read_only_enforced", "mutation_denial"}:
-        if enforcement == "host" and any(item.get("kind") in {"documentation", "sample"} for item in evidence):
+        if enforcement == "host" and any(
+            item.get("kind") in {"documentation", "sample"} for item in evidence
+        ):
             # A readonly field in docs or an example establishes neither a
             # runtime mutation denial nor its reach into a child session.
             errors.append("%s: readonly documentation/sample cannot prove mutation denial" % name)
@@ -96,7 +100,9 @@ def check_capability_claims(node, trail, problems):
     """Walk new-form claims while keeping old interfaces backwards compatible."""
     if isinstance(node, dict):
         if "availability" in node or "enforcement" in node:
-            problems.extend("%s: %s" % (trail, error) for error in capability_semantic_errors(node, trail))
+            problems.extend(
+                "%s: %s" % (trail, error) for error in capability_semantic_errors(node, trail)
+            )
         for key, value in node.items():
             check_capability_claims(value, "%s.%s" % (trail, key), problems)
     elif isinstance(node, list):

@@ -82,7 +82,7 @@ def main() -> int:
         if not raw_input.strip():
             json.dump({"injectSteps": []}, sys.stdout)
             return 0
-        data = json.loads(raw_input)
+        json.loads(raw_input)
     except Exception:
         json.dump({"injectSteps": []}, sys.stdout)
         return 0

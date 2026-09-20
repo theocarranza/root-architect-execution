@@ -35,7 +35,9 @@ _ATTEMPT_TRANSITIONS = {
 def _schema(name):
     if name not in RECORD_TYPES and name != "outcome":
         raise ValueError("unknown runtime record type: %s" % name)
-    filename = "orchestrator-outcome.schema.json" if name == "outcome" else "runtime-%s.schema.json" % name
+    filename = (
+        "orchestrator-outcome.schema.json" if name == "outcome" else "runtime-%s.schema.json" % name
+    )
     return Validator(SCHEMAS / filename)
 
 
@@ -59,7 +61,9 @@ def validate_envelope(record, controller_principal):
     errors = validate_record("envelope", record)
     if errors:
         return errors
-    if not isinstance(controller_principal, str) or not controller_principal.startswith("controller:"):
+    if not isinstance(controller_principal, str) or not controller_principal.startswith(
+        "controller:"
+    ):
         return ["controller principal is not a controller identity"]
     if record["captured_by"] != controller_principal:
         return ["envelope captured_by does not match the trusted controller"]
@@ -75,7 +79,10 @@ def validate_envelope(record, controller_principal):
     route = (_party_class(record["from"]), _party_class(record["to"]))
     allowed = _ROUTES.get(route)
     if allowed is None or record["kind"] not in allowed:
-        return ["invalid envelope route %s -> %s for %s" % (record["from"], record["to"], record["kind"])]
+        return [
+            "invalid envelope route %s -> %s for %s"
+            % (record["from"], record["to"], record["kind"])
+        ]
     return []
 
 
@@ -138,7 +145,9 @@ def validate_outcome(record):
     return []
 
 
-def valid_preflight(run_id, host_id, workspace_fingerprint, configuration_fingerprint, principal_id):
+def valid_preflight(
+    run_id, host_id, workspace_fingerprint, configuration_fingerprint, principal_id
+):
     """Small valid fixture builder for callers testing a literal preflight result."""
     return {
         "schema_version": 2,

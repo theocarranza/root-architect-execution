@@ -208,7 +208,13 @@ def find_gemini_agent_md(workspace, agent_name="orchestrator"):
         root / "agents" / f"{agent_name}.md",
         root / "adapters" / "gemini" / "agents" / f"{agent_name}.md",
         root / "dist" / "gemini" / "agents" / f"{agent_name}.md",
-        Path.home() / ".gemini" / "config" / "plugins" / "root-architect-execution" / "agents" / f"{agent_name}.md",
+        Path.home()
+        / ".gemini"
+        / "config"
+        / "plugins"
+        / "root-architect-execution"
+        / "agents"
+        / f"{agent_name}.md",
     ):
         if candidate.is_file():
             return candidate
@@ -368,12 +374,23 @@ def cmd_check(args):
     try:
         evidence = json.loads(Path(args.capability_evidence).read_text(encoding="utf-8"))
         admission = {
-            "run_id": args.run_id, "host_id": args.host, "workspace": str(Path(args.workspace).resolve()),
+            "run_id": args.run_id,
+            "host_id": args.host,
+            "workspace": str(Path(args.workspace).resolve()),
             "workspace_fingerprint": args.workspace_fingerprint,
-            "controller_session_id": args.controller_session_id, "catalog_digest": args.catalog_digest,
-            "configuration_fingerprint": args.configuration_digest, "capability_evidence": evidence,
+            "controller_session_id": args.controller_session_id,
+            "catalog_digest": args.catalog_digest,
+            "configuration_fingerprint": args.configuration_digest,
+            "capability_evidence": evidence,
         }
-        record = run(args.workspace, args.run_id, args.observed, args.host, auto=args.auto, admission=admission)
+        record = run(
+            args.workspace,
+            args.run_id,
+            args.observed,
+            args.host,
+            auto=args.auto,
+            admission=admission,
+        )
     except PreflightError as exc:
         print("  %s" % exc, file=sys.stderr)
         return 1
@@ -424,9 +441,23 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.status:
         return cmd_status(args)
-    missing = [name for name in ("controller_session_id", "catalog_digest", "configuration_digest", "workspace_fingerprint", "capability_evidence") if not getattr(args, name)]
+    missing = [
+        name
+        for name in (
+            "controller_session_id",
+            "catalog_digest",
+            "configuration_digest",
+            "workspace_fingerprint",
+            "capability_evidence",
+        )
+        if not getattr(args, name)
+    ]
     if missing:
-        print("  explicit admission inputs required: %s" % ", ".join("--" + name.replace("_", "-") for name in missing), file=sys.stderr)
+        print(
+            "  explicit admission inputs required: %s"
+            % ", ".join("--" + name.replace("_", "-") for name in missing),
+            file=sys.stderr,
+        )
         return 2
     if not args.observed and not args.auto:
         print(

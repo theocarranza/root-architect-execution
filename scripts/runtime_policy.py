@@ -12,12 +12,19 @@ from pathlib import Path
 
 PREFLIGHT_SUBDIR = Path(".root-architect") / "preflight"
 IDENTITY_FIELDS = (
-    "run_id", "host_id", "workspace", "workspace_fingerprint",
-    "controller_session_id", "catalog_digest", "configuration_fingerprint",
+    "run_id",
+    "host_id",
+    "workspace",
+    "workspace_fingerprint",
+    "controller_session_id",
+    "catalog_digest",
+    "configuration_fingerprint",
 )
 REQUIRED_CAPABILITIES = (
-    "delegation_available", "controller_selection_enforced",
-    "registered_agents", "hook_registration_enforced",
+    "delegation_available",
+    "controller_selection_enforced",
+    "registered_agents",
+    "hook_registration_enforced",
 )
 MAX_EVIDENCE_AGE = timedelta(minutes=5)
 
@@ -35,7 +42,7 @@ def unsupported_direct_mutation(context=None):
     """
     _fail(
         context or {},
-        "unsupported_boundary: direct compatibility mutation has no authenticated controller identity"
+        "unsupported_boundary: direct compatibility mutation has no authenticated controller identity",
     )
 
 
@@ -44,9 +51,15 @@ def _nonempty(value):
 
 
 def _recovery(context):
-    host = context.get("host_id", "the selected host") if isinstance(context, dict) else "the selected host"
+    host = (
+        context.get("host_id", "the selected host")
+        if isinstance(context, dict)
+        else "the selected host"
+    )
     run = context.get("run_id", "<run-id>") if isinstance(context, dict) else "<run-id>"
-    workspace = context.get("workspace", "<workspace>") if isinstance(context, dict) else "<workspace>"
+    workspace = (
+        context.get("workspace", "<workspace>") if isinstance(context, dict) else "<workspace>"
+    )
     return (
         "Recovery for %s run %s in %s: use a protected authenticated controller service for "
         "that selected host; direct compatibility commands cannot authorize mutation."
@@ -92,7 +105,9 @@ def validate_context(context):
     evidence = context.get("capability_evidence")
     if not isinstance(evidence, dict):
         _fail(context, "missing selected transport capability evidence")
-    if evidence.get("source") != "selected_transport" or not _nonempty(evidence.get("transport_id")):
+    if evidence.get("source") != "selected_transport" or not _nonempty(
+        evidence.get("transport_id")
+    ):
         _fail(context, "capability evidence is not from the selected transport")
     _recent_timestamp(context, evidence.get("observed_at"), "selected transport observed_at")
     capabilities = evidence.get("capabilities")
@@ -143,7 +158,10 @@ def admit(workspace, context):
         _fail(context, "admission record has no supported admission version")
     for field in IDENTITY_FIELDS:
         if record.get(field) != context[field]:
-            _fail(context, "admission record %s does not match this mutation" % field.replace("_", " "))
+            _fail(
+                context,
+                "admission record %s does not match this mutation" % field.replace("_", " "),
+            )
     if record.get("capability_evidence") != context["capability_evidence"]:
         _fail(context, "admission record capability evidence does not match this mutation")
     # Revalidate evidence stored on disk; a truthy string or forged field never

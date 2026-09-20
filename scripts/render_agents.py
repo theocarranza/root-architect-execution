@@ -50,8 +50,11 @@ def normalize_capability(capability):
         "enforcement": "unknown",
         "scope": "unknown",
         "execution_surface": "unknown",
-        "evidence": ([{"kind": "legacy", "reference": capability["verified"]}]
-                     if capability.get("verified") else []),
+        "evidence": (
+            [{"kind": "legacy", "reference": capability["verified"]}]
+            if capability.get("verified")
+            else []
+        ),
     }
 
 
