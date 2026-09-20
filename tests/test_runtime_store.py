@@ -32,7 +32,7 @@ def attempt_record():
         "run_id": "run-1",
         "task_id": "task-1",
         "attempt_id": "attempt-1",
-        "provider_thread_id": "thread-1",
+        "provider_thread_id": None,
         "provider_turn_id": "turn-1",
         "provider_event_id": None,
         "selected_template": "impl-executor-cheap",
@@ -40,11 +40,11 @@ def attempt_record():
         "last_activity_at": "2026-09-20T00:00:00Z",
         "deadline_at": "2026-09-20T01:00:00Z",
         "last_envelope_id": None,
-        "observed_activity_state": "active",
+        "observed_activity_state": "unknown",
         "provider_observed_at": None,
         "local_bookkeeping_at": "2026-09-20T00:00:00Z",
         "controller_lease_expires_at": "2026-09-20T01:00:00Z",
-        "state": "active",
+        "state": "reserved",
     }
 
 
@@ -56,11 +56,12 @@ def envelope_record(body, event_id="provider-event-1"):
         "task_id": "task-1",
         "attempt_id": "attempt-1",
         "kind": "report",
-        "from": "worker:implementer",
+        "from": "worker:impl-executor-cheap",
         "to": "orchestrator",
         "captured_by": "controller:local-1",
         "capture_source": "controller",
         "reply_to": "env-task-1",
+        "selected_template": "impl-executor-cheap",
         "body_sha256": hashlib.sha256(body).hexdigest(),
         "created_at": "2026-09-20T00:02:00Z",
         "provider_thread_id": "thread-1",
@@ -102,7 +103,32 @@ class RuntimeStoreTests(unittest.TestCase):
         self.root = Path(self.temp.name) / ".root-architect" / "state"
         self.store = RuntimeStore(self.root)
         self.store.create_run(run_record())
-        self.store.create_attempt(attempt_record())
+        record = attempt_record()
+        dispatch_body = b"task"
+        dispatch_envelope = {
+            "schema_version": 2,
+            "envelope_id": "env-task-1",
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "kind": "task",
+            "from": "orchestrator",
+            "to": "worker:impl-executor-cheap",
+            "captured_by": "controller:local-1",
+            "capture_source": "controller",
+            "reply_to": None,
+            "selected_template": "impl-executor-cheap",
+            "body_sha256": hashlib.sha256(dispatch_body).hexdigest(),
+            "created_at": "2026-09-20T00:00:00Z",
+            "provider_thread_id": None,
+            "provider_turn_id": None,
+            "provider_event_id": None,
+        }
+        self.store.reserve_attempt(
+            record, "ws", "launch-1", "parent-1", dispatch_envelope, dispatch_body
+        )
+        self.store.begin_launch("attempt-1")
+        self.store.record_launch_started("attempt-1", "thread-1")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -121,7 +147,7 @@ class RuntimeStoreTests(unittest.TestCase):
             worker.join(10)
             self.assertEqual(0, worker.exitcode)
         results = [queue.get(timeout=2) for _ in workers]
-        self.assertEqual(1, self.store.count("envelopes"))
+        self.assertEqual(2, self.store.count("envelopes"))
         self.assertEqual({result["envelope_id"] for result in results}, {results[0]["envelope_id"]})
         self.assertEqual("captured", self.store.attempt_state("attempt-1"))
 
@@ -135,20 +161,20 @@ class RuntimeStoreTests(unittest.TestCase):
         self.assertEqual("captured", first["status"])
         self.assertEqual("conflict", conflict["status"])
         self.assertEqual("blocked", self.store.run_state("run-1"))
-        self.assertEqual(2, self.store.count("envelopes"))
+        self.assertEqual(3, self.store.count("envelopes"))
 
     def test_failure_before_commit_leaves_no_partial_evidence_or_transition(self):
         with self.assertRaises(StorageError):
             self.store.capture_result(
                 envelope_record(b"body"), b"body", "dedup-1", "captured", fail_before_commit=True
             )
-        self.assertEqual(0, self.store.count("envelopes"))
+        self.assertEqual(1, self.store.count("envelopes"))
         self.assertEqual("active", self.store.attempt_state("attempt-1"))
 
     def test_restart_after_commit_keeps_evidence_and_transition_together(self):
         self.store.capture_result(envelope_record(b"body"), b"body", "dedup-1", "captured")
         restarted = RuntimeStore(self.root)
-        self.assertEqual(1, restarted.count("envelopes"))
+        self.assertEqual(2, restarted.count("envelopes"))
         self.assertEqual("captured", restarted.attempt_state("attempt-1"))
 
     def test_forced_exit_before_and_after_commit_has_no_torn_state(self):
@@ -158,7 +184,7 @@ class RuntimeStoreTests(unittest.TestCase):
         before.start()
         before.join(10)
         self.assertEqual(17, before.exitcode)
-        self.assertEqual(0, self.store.count("envelopes"))
+        self.assertEqual(1, self.store.count("envelopes"))
         self.assertEqual("active", self.store.attempt_state("attempt-1"))
         after = multiprocessing.Process(
             target=capture_then_forced_exit, args=(str(self.root), False)
@@ -166,14 +192,14 @@ class RuntimeStoreTests(unittest.TestCase):
         after.start()
         after.join(10)
         self.assertEqual(18, after.exitcode)
-        self.assertEqual(1, RuntimeStore(self.root).count("envelopes"))
+        self.assertEqual(2, RuntimeStore(self.root).count("envelopes"))
         self.assertEqual("captured", RuntimeStore(self.root).attempt_state("attempt-1"))
 
     def test_write_failure_rolls_back(self):
         self.store.fail_next_write_for_test()
         with self.assertRaises(StorageError):
             self.store.capture_result(envelope_record(b"body"), b"body", "dedup-1", "captured")
-        self.assertEqual(0, self.store.count("envelopes"))
+        self.assertEqual(1, self.store.count("envelopes"))
         self.assertEqual("active", self.store.attempt_state("attempt-1"))
 
     def test_exports_are_generated_and_partial_export_is_recoverable(self):

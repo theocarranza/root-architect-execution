@@ -262,13 +262,13 @@ These assertions describe required observations; tests must induce the failures 
 
 **Files:** modify `scripts/job_queue.py`, `scripts/dispatch_state.py`, `scripts/runtime_policy.py`, and `scripts/runtime_store.py`; create `tests/test_runtime_lifecycle.py`.
 
-- [ ] Reserve the workspace and create the attempt before calling the host. Record the launch idempotency key, selected template, deadline, and intended parent.
-- [ ] Record successful child creation or start failure without guessing a child ID. On crash between launch and acknowledgement, reconcile by the launch key; do not launch another child until the first is found or proven absent.
-- [ ] Enforce one active/reserved/cancelling dependent attempt across runs for that workspace in the database, including direct calls that bypass `next`.
-- [ ] Commit captured envelope and attempt transition together. No terminal result may point at a missing, invalid, or unrelated envelope.
-- [ ] Keep machine validation separate from orchestrator judgment. Require the orchestrator's recorded decision before progressing to a validator, repair, or outcome.
-- [ ] Add a new immutable attempt for a repair or model escalation. Permit at most one format correction per worker return and preserve the original evidence; keep it distinct from an implementation attempt.
-- [ ] Validate final outcomes against required implementation/specification/quality decisions. Root's final outcome gate remains separate from the orchestrator's recommendation.
+- [x] Reserve the workspace and create the attempt before calling the host. Record the launch idempotency key, selected template, deadline, and intended parent.
+- [x] Record successful child creation or start failure without guessing a child ID. On crash between launch and acknowledgement, reconcile by the launch key; do not launch another child until the first is found or proven absent.
+- [x] Enforce one active/reserved/cancelling dependent attempt across runs for that workspace in the database, including direct calls that bypass `next`.
+- [x] Commit captured envelope and attempt transition together. No terminal result may point at a missing, invalid, or unrelated envelope.
+- [x] Keep machine validation separate from orchestrator judgment. Require the orchestrator's recorded decision before progressing to a validator, repair, or outcome.
+- [x] Add a new immutable attempt for a repair or model escalation. Permit at most one format correction per worker return and preserve the original evidence; keep it distinct from an implementation attempt.
+- [x] Validate final outcomes against required implementation/specification/quality decisions. Root's final outcome gate remains separate from the orchestrator's recommendation.
 
 **Validation:** `python3 -m unittest tests.test_runtime_lifecycle -v`. Include simultaneous reservation, report replay, terminal-state reversal, crash after host start, and accepted outcome with a missing validator.
 

@@ -10,10 +10,10 @@ import json
 import sqlite3
 from pathlib import Path
 
-from runtime_contract import validate_record, validate_attempt_transition
+from runtime_contract import validate_record, validate_attempt_transition, validate_outcome
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 4
 BUSY_TIMEOUT_MS = 2_000
 
 
@@ -90,7 +90,7 @@ class RuntimeStore:
             applied = {
                 row[0] for row in connection.execute("SELECT version FROM schema_migrations")
             }
-            if SCHEMA_VERSION not in applied:
+            if 1 not in applied:
                 connection.executescript("""
                 CREATE TABLE runs (run_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, state TEXT NOT NULL);
                 CREATE TABLE preflights (preflight_id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(run_id), record_json TEXT NOT NULL);
@@ -103,9 +103,57 @@ class RuntimeStore:
                 CREATE INDEX envelopes_dedup_identity ON envelopes(dedup_key);
                 CREATE INDEX events_attempt ON events(attempt_id);
                 """)
-                connection.execute(
-                    "INSERT INTO schema_migrations(version) VALUES (?)", (SCHEMA_VERSION,)
+                connection.execute("INSERT INTO schema_migrations(version) VALUES (1)")
+            if 2 not in applied:
+                connection.execute("""
+                CREATE TABLE launches (
+                    attempt_id TEXT PRIMARY KEY REFERENCES attempts(attempt_id),
+                    workspace_fingerprint TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    intended_parent TEXT NOT NULL,
+                    provider_thread_id TEXT,
+                    state TEXT NOT NULL
                 )
+                """)
+                connection.execute("INSERT INTO schema_migrations(version) VALUES (2)")
+            if 3 not in applied:
+                connection.execute("ALTER TABLE launches ADD COLUMN dispatch_envelope_id TEXT")
+                connection.execute(
+                    "ALTER TABLE launches ADD COLUMN purpose TEXT NOT NULL DEFAULT 'implementation'"
+                )
+                connection.execute(
+                    "ALTER TABLE launches ADD COLUMN parent_attempt_id TEXT REFERENCES attempts(attempt_id)"
+                )
+                connection.execute(
+                    "ALTER TABLE launches ADD COLUMN source_envelope_id TEXT REFERENCES envelopes(envelope_id)"
+                )
+                connection.executescript("""
+                CREATE TABLE attempt_lineage (
+                    attempt_id TEXT PRIMARY KEY REFERENCES attempts(attempt_id),
+                    parent_attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id),
+                    purpose TEXT NOT NULL,
+                    source_envelope_id TEXT NOT NULL REFERENCES envelopes(envelope_id)
+                );
+                CREATE TABLE format_corrections (
+                    source_envelope_id TEXT PRIMARY KEY REFERENCES envelopes(envelope_id),
+                    attempt_id TEXT NOT NULL UNIQUE REFERENCES attempts(attempt_id)
+                );
+                CREATE TABLE validations (
+                    attempt_id TEXT PRIMARY KEY REFERENCES attempts(attempt_id),
+                    run_id TEXT NOT NULL REFERENCES runs(run_id),
+                    envelope_id TEXT NOT NULL REFERENCES envelopes(envelope_id),
+                    valid INTEGER NOT NULL CHECK(valid IN (0,1)),
+                    validator_ref TEXT NOT NULL,
+                    principal_id TEXT NOT NULL
+                );
+                """)
+                connection.execute("INSERT INTO schema_migrations(version) VALUES (3)")
+            if 4 not in applied:
+                connection.execute(
+                    "CREATE UNIQUE INDEX one_decision_per_attempt "
+                    "ON decisions(run_id, attempt_id) WHERE attempt_id IS NOT NULL"
+                )
+                connection.execute("INSERT INTO schema_migrations(version) VALUES (4)")
 
     @contextlib.contextmanager
     def _mutation(self):
@@ -147,12 +195,157 @@ class RuntimeStore:
             )
 
     def create_attempt(self, record):
+        raise StorageError(
+            "direct attempt creation is unsupported; use the reserved launch lifecycle"
+        )
+
+    @staticmethod
+    def _reservation_is_live(state):
+        # Reservations exist only while this row is present; status alone never
+        # proves a child writer stopped.
+        return True
+
+    def reserve_attempt(
+        self,
+        record,
+        workspace_fingerprint,
+        idempotency_key,
+        intended_parent,
+        dispatch_envelope,
+        dispatch_body,
+        purpose="implementation",
+        parent_attempt_id=None,
+        source_envelope_id=None,
+    ):
+        """Atomically persist attempt and workspace/launch reservation before host start."""
         errors = validate_record("attempt", record)
         if errors:
             raise StorageError("invalid attempt: " + "; ".join(errors))
+        if not all(
+            isinstance(value, str) and value
+            for value in (workspace_fingerprint, idempotency_key, intended_parent)
+        ):
+            raise StorageError("workspace, launch key, and intended parent are required")
+        if not isinstance(dispatch_body, bytes) or not isinstance(dispatch_envelope, dict):
+            raise StorageError("a captured dispatch envelope and its exact raw bytes are required")
+        if hashlib.sha256(dispatch_body).hexdigest() != dispatch_envelope.get("body_sha256"):
+            raise StorageError("dispatch envelope hash does not match its raw bytes")
+        if purpose not in {
+            "implementation",
+            "specification",
+            "quality",
+            "repair",
+            "escalation",
+            "format_correction",
+        }:
+            raise StorageError("attempt purpose is unsupported")
+        if purpose == "implementation" and (
+            parent_attempt_id is not None or source_envelope_id is not None
+        ):
+            raise StorageError("initial implementation attempt cannot claim lineage")
+        if purpose != "implementation" and (not parent_attempt_id or not source_envelope_id):
+            raise StorageError("follow-up attempts require a parent attempt and source evidence")
+        family_prefix = {
+            "implementation": "impl-",
+            "specification": "spec-",
+            "quality": "quality-",
+        }.get(purpose)
+        if family_prefix and not record["selected_template"].startswith(family_prefix):
+            raise StorageError("selected template does not match the attempt purpose")
+        if record["state"] != "reserved":
+            raise StorageError("new launch attempts must begin reserved")
         with self._mutation() as connection:
+            run = connection.execute(
+                "SELECT record_json FROM runs WHERE run_id = ?", (record["run_id"],)
+            ).fetchone()
+            if (
+                run is None
+                or json.loads(run[0]).get("workspace_fingerprint") != workspace_fingerprint
+            ):
+                raise StorageError("workspace fingerprint does not match the run")
+            run_record = json.loads(run[0])
+            dispatch_errors = validate_record("envelope", dispatch_envelope)
+            if dispatch_errors:
+                raise StorageError("invalid dispatch envelope: " + "; ".join(dispatch_errors))
+            expected_dispatch = {
+                "run_id": record["run_id"],
+                "task_id": record["task_id"],
+                "attempt_id": record["attempt_id"],
+                "kind": "task",
+                "from": "orchestrator",
+                "to": "worker:" + record["selected_template"],
+                "captured_by": run_record["principal_id"],
+                "selected_template": record["selected_template"],
+            }
+            if any(dispatch_envelope.get(key) != value for key, value in expected_dispatch.items()):
+                raise StorageError("dispatch envelope does not match the controller-owned attempt")
+            existing = connection.execute(
+                "SELECT attempt_id, state FROM workspace_reservations WHERE workspace_fingerprint = ?",
+                (workspace_fingerprint,),
+            ).fetchone()
+            if (
+                existing
+                and existing["attempt_id"] != record["attempt_id"]
+                and self._reservation_is_live(existing["state"])
+            ):
+                raise StorageError("workspace already has a dependent attempt reserved or active")
+            parent = None
+            if parent_attempt_id is not None:
+                parent = connection.execute(
+                    "SELECT run_id, state, last_envelope_id, record_json FROM attempts WHERE attempt_id=?",
+                    (parent_attempt_id,),
+                ).fetchone()
+                if (
+                    parent is None
+                    or parent["run_id"] != record["run_id"]
+                    or parent["last_envelope_id"] != source_envelope_id
+                    or parent["state"] not in {"invalid", "validated"}
+                ):
+                    raise StorageError(
+                        "follow-up attempt must link to a validated or invalid parent return"
+                    )
+                if (
+                    connection.execute(
+                        "SELECT 1 FROM envelopes WHERE envelope_id=? AND attempt_id=?",
+                        (source_envelope_id, parent_attempt_id),
+                    ).fetchone()
+                    is None
+                ):
+                    raise StorageError(
+                        "follow-up source evidence does not belong to its parent attempt"
+                    )
+                prerequisite = connection.execute(
+                    "SELECT d.record_json FROM decisions d WHERE d.attempt_id=? ORDER BY d.decision_id",
+                    (parent_attempt_id,),
+                ).fetchall()
+                decisions = [json.loads(row[0])["decision"] for row in prerequisite]
+                required_decisions = (
+                    {"format_correction"}
+                    if purpose == "format_correction"
+                    else {"reject", "repair", "escalate"}
+                    if purpose in {"repair", "escalation"}
+                    else {"accept"}
+                )
+                if not required_decisions.intersection(decisions):
+                    raise StorageError(
+                        "follow-up attempt requires a recorded orchestrator decision"
+                    )
+                if (
+                    purpose == "format_correction"
+                    and connection.execute(
+                        "SELECT 1 FROM format_corrections WHERE source_envelope_id=?",
+                        (source_envelope_id,),
+                    ).fetchone()
+                ):
+                    raise StorageError("a worker return may receive only one format correction")
+                if purpose in {"repair", "escalation", "format_correction"}:
+                    parent_template = json.loads(parent["record_json"])["selected_template"]
+                    if record["selected_template"].split("-")[0] != parent_template.split("-")[0]:
+                        raise StorageError(
+                            "repair and escalation attempts must preserve the worker family"
+                        )
             connection.execute(
-                "INSERT OR IGNORE INTO tasks(task_id, run_id, record_json) VALUES (?, ?, ?)",
+                "INSERT INTO tasks(task_id, run_id, record_json) VALUES (?, ?, ?)",
                 (record["task_id"], record["run_id"], self._json({"task_id": record["task_id"]})),
             )
             connection.execute(
@@ -163,9 +356,289 @@ class RuntimeStore:
                     record["task_id"],
                     self._json(record),
                     record["state"],
-                    record["last_envelope_id"],
+                    None,
                 ),
             )
+            connection.execute(
+                "INSERT INTO envelopes(envelope_id, run_id, task_id, attempt_id, dedup_key, body, body_sha256, source_metadata_json, record_json, correction_of) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                (
+                    dispatch_envelope["envelope_id"],
+                    record["run_id"],
+                    record["task_id"],
+                    record["attempt_id"],
+                    "dispatch:" + idempotency_key,
+                    dispatch_body,
+                    dispatch_envelope["body_sha256"],
+                    self._json(self._source_metadata(dispatch_envelope)),
+                    self._json(dispatch_envelope),
+                ),
+            )
+            connection.execute(
+                "INSERT INTO workspace_reservations(workspace_fingerprint, run_id, attempt_id, state, record_json) VALUES (?, ?, ?, ?, ?)",
+                (
+                    workspace_fingerprint,
+                    record["run_id"],
+                    record["attempt_id"],
+                    record["state"],
+                    self._json({"attempt_id": record["attempt_id"]}),
+                ),
+            )
+            connection.execute(
+                "INSERT INTO launches(attempt_id, workspace_fingerprint, idempotency_key, intended_parent, provider_thread_id, state, dispatch_envelope_id, purpose, parent_attempt_id, source_envelope_id) VALUES (?, ?, ?, ?, NULL, 'reserved', ?, ?, ?, ?)",
+                (
+                    record["attempt_id"],
+                    workspace_fingerprint,
+                    idempotency_key,
+                    intended_parent,
+                    dispatch_envelope["envelope_id"],
+                    purpose,
+                    parent_attempt_id,
+                    source_envelope_id,
+                ),
+            )
+            if parent_attempt_id is not None:
+                connection.execute(
+                    "INSERT INTO attempt_lineage(attempt_id, parent_attempt_id, purpose, source_envelope_id) VALUES (?, ?, ?, ?)",
+                    (record["attempt_id"], parent_attempt_id, purpose, source_envelope_id),
+                )
+                if purpose == "format_correction":
+                    connection.execute(
+                        "INSERT INTO format_corrections(source_envelope_id, attempt_id) VALUES (?, ?)",
+                        (source_envelope_id, record["attempt_id"]),
+                    )
+
+    def reserve_followup_attempt(
+        self,
+        record,
+        workspace_fingerprint,
+        idempotency_key,
+        intended_parent,
+        dispatch_envelope,
+        dispatch_body,
+        purpose,
+        parent_attempt_id,
+    ):
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT last_envelope_id FROM attempts WHERE attempt_id=?", (parent_attempt_id,)
+            ).fetchone()
+        if row is None or row["last_envelope_id"] is None:
+            raise StorageError("follow-up parent has no captured return")
+        return self.reserve_attempt(
+            record,
+            workspace_fingerprint,
+            idempotency_key,
+            intended_parent,
+            dispatch_envelope,
+            dispatch_body,
+            purpose,
+            parent_attempt_id,
+            row["last_envelope_id"],
+        )
+
+    def record_machine_validation(self, attempt_id, valid, validator_ref):
+        if type(valid) is not bool or not isinstance(validator_ref, str) or not validator_ref:
+            raise StorageError("machine validation requires a boolean result and reference")
+        with self._mutation() as connection:
+            attempt = connection.execute(
+                "SELECT run_id, state, last_envelope_id FROM attempts WHERE attempt_id=?",
+                (attempt_id,),
+            ).fetchone()
+            if attempt is None or attempt["state"] != "captured" or not attempt["last_envelope_id"]:
+                raise StorageError("machine validation requires one captured return")
+            run = connection.execute(
+                "SELECT record_json FROM runs WHERE run_id=?", (attempt["run_id"],)
+            ).fetchone()
+            principal = json.loads(run[0])["principal_id"]
+            next_state = "validated" if valid else "invalid"
+            connection.execute(
+                "INSERT INTO validations(attempt_id, run_id, envelope_id, valid, validator_ref, principal_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    attempt_id,
+                    attempt["run_id"],
+                    attempt["last_envelope_id"],
+                    int(valid),
+                    validator_ref,
+                    principal,
+                ),
+            )
+            record = json.loads(
+                connection.execute(
+                    "SELECT record_json FROM attempts WHERE attempt_id=?", (attempt_id,)
+                ).fetchone()[0]
+            )
+            record["state"] = next_state
+            connection.execute(
+                "UPDATE attempts SET state=?, record_json=? WHERE attempt_id=?",
+                (next_state, self._json(record), attempt_id),
+            )
+
+    def confirm_attempt_stopped(self, attempt_id, provider_thread_id):
+        if not isinstance(provider_thread_id, str) or not provider_thread_id:
+            raise StorageError("stop confirmation must identify the recorded child")
+        with self._mutation() as connection:
+            launch = connection.execute(
+                "SELECT provider_thread_id, state FROM launches WHERE attempt_id=?", (attempt_id,)
+            ).fetchone()
+            attempt = connection.execute(
+                "SELECT record_json, state FROM attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone()
+            if (
+                launch is None
+                or attempt is None
+                or launch["provider_thread_id"] != provider_thread_id
+            ):
+                raise StorageError("stop confirmation does not match the launched child")
+            if attempt["state"] not in {"validated", "invalid"}:
+                raise StorageError(
+                    "child can be released only after its return is machine-validated"
+                )
+            connection.execute(
+                "UPDATE launches SET state='stopped' WHERE attempt_id=?", (attempt_id,)
+            )
+            connection.execute(
+                "DELETE FROM workspace_reservations WHERE attempt_id=?", (attempt_id,)
+            )
+
+    def record_format_correction(self, source_envelope_id, correction_attempt_id):
+        """Record at most one correction request while retaining its original report."""
+        with self._mutation() as connection:
+            lineage = connection.execute(
+                "SELECT source_envelope_id, purpose FROM attempt_lineage WHERE attempt_id=?",
+                (correction_attempt_id,),
+            ).fetchone()
+            if (
+                lineage is None
+                or lineage["purpose"] != "format_correction"
+                or lineage["source_envelope_id"] != source_envelope_id
+            ):
+                raise StorageError("format correction must be a linked format_correction attempt")
+            try:
+                connection.execute(
+                    "INSERT INTO format_corrections(source_envelope_id, attempt_id) VALUES (?, ?)",
+                    (source_envelope_id, correction_attempt_id),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise StorageError(
+                    "a worker return may receive only one format correction"
+                ) from exc
+
+    def begin_launch(self, attempt_id):
+        self._set_launch_state(attempt_id, "starting")
+
+    def record_launch_started(self, attempt_id, provider_thread_id):
+        if not isinstance(provider_thread_id, str) or not provider_thread_id:
+            raise StorageError("host start acknowledgement must include its actual child id")
+        with self._mutation() as connection:
+            row = connection.execute(
+                "SELECT state FROM launches WHERE attempt_id = ?", (attempt_id,)
+            ).fetchone()
+            if row is None or row["state"] not in {"starting", "started"}:
+                raise StorageError("launch must be marked starting before host acknowledgement")
+            if row["state"] == "started":
+                existing = connection.execute(
+                    "SELECT provider_thread_id FROM launches WHERE attempt_id=?", (attempt_id,)
+                ).fetchone()[0]
+                if existing != provider_thread_id:
+                    raise StorageError(
+                        "launch acknowledgement conflicts with its recorded child id"
+                    )
+                return
+            connection.execute(
+                "UPDATE launches SET state='started', provider_thread_id=? WHERE attempt_id=?",
+                (provider_thread_id, attempt_id),
+            )
+            connection.execute(
+                "UPDATE attempts SET state='active' WHERE attempt_id=? AND state IN ('reserved', 'starting')",
+                (attempt_id,),
+            )
+            row = connection.execute(
+                "SELECT record_json FROM attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone()
+            if row:
+                record = json.loads(row[0])
+                record["state"] = "active"
+                record["provider_thread_id"] = provider_thread_id
+                connection.execute(
+                    "UPDATE attempts SET record_json=? WHERE attempt_id=?",
+                    (self._json(record), attempt_id),
+                )
+            connection.execute(
+                "UPDATE workspace_reservations SET state='active' WHERE attempt_id=?", (attempt_id,)
+            )
+
+    def record_launch_failed(self, attempt_id):
+        with self._mutation() as connection:
+            row = connection.execute(
+                "SELECT state FROM launches WHERE attempt_id = ?", (attempt_id,)
+            ).fetchone()
+            if row is None or row["state"] not in {"reserved", "starting"}:
+                raise StorageError("launch failure cannot be recorded after an acknowledgement")
+            connection.execute(
+                "UPDATE launches SET state='start_failed' WHERE attempt_id=?", (attempt_id,)
+            )
+            connection.execute(
+                "UPDATE attempts SET state='start_failed' WHERE attempt_id=?", (attempt_id,)
+            )
+            row = connection.execute(
+                "SELECT record_json FROM attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone()
+            if row:
+                record = json.loads(row[0])
+                record["state"] = "start_failed"
+                connection.execute(
+                    "UPDATE attempts SET record_json=? WHERE attempt_id=?",
+                    (self._json(record), attempt_id),
+                )
+            connection.execute(
+                "DELETE FROM workspace_reservations WHERE attempt_id=?", (attempt_id,)
+            )
+
+    def _set_launch_state(self, attempt_id, state):
+        with self._mutation() as connection:
+            cursor = connection.execute(
+                "UPDATE launches SET state=? WHERE attempt_id=? AND state='reserved'",
+                (state, attempt_id),
+            )
+            if cursor.rowcount != 1:
+                raise StorageError("launch is not reserved")
+            connection.execute(
+                "UPDATE attempts SET state='starting' WHERE attempt_id=? AND state='reserved'",
+                (attempt_id,),
+            )
+            row = connection.execute(
+                "SELECT record_json FROM attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone()
+            if row:
+                record = json.loads(row[0])
+                record["state"] = "starting"
+                connection.execute(
+                    "UPDATE attempts SET record_json=? WHERE attempt_id=?",
+                    (self._json(record), attempt_id),
+                )
+            connection.execute(
+                "UPDATE workspace_reservations SET state='starting' WHERE attempt_id=?",
+                (attempt_id,),
+            )
+
+    def reconcile_launch(self, idempotency_key, lookup=None):
+        """Resolve a recorded launch key; unresolved starts remain reserved and cannot relaunch."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT attempt_id, provider_thread_id, state FROM launches WHERE idempotency_key=?",
+                (idempotency_key,),
+            ).fetchone()
+        if row is None:
+            raise StorageError("unknown launch idempotency key")
+        if row["provider_thread_id"]:
+            return row["provider_thread_id"]
+        if lookup is None:
+            return None
+        found = lookup(idempotency_key)
+        if found:
+            self.record_launch_started(row["attempt_id"], found)
+            return found
+        return None
 
     def capture_result(self, envelope, body, dedup_key, new_state, fail_before_commit=False):
         if not isinstance(body, bytes) or not isinstance(dedup_key, str) or not dedup_key:
@@ -175,12 +648,45 @@ class RuntimeStore:
         errors = validate_record("envelope", envelope)
         if errors:
             raise StorageError("invalid envelope: " + "; ".join(errors))
+        if envelope["kind"] not in {"answer", "report"}:
+            raise StorageError("only an answer or report can complete a worker attempt")
         with self._mutation() as connection:
+            attempt = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id = ?", (envelope["attempt_id"],)
+            ).fetchone()
+            if (
+                attempt is None
+                or attempt["run_id"] != envelope["run_id"]
+                or attempt["task_id"] != envelope["task_id"]
+            ):
+                raise StorageError("envelope does not belong to an existing attempt")
+            launch = connection.execute(
+                "SELECT * FROM launches WHERE attempt_id = ?", (envelope["attempt_id"],)
+            ).fetchone()
+            if launch is None or launch["state"] != "started":
+                raise StorageError("report has no acknowledged controller-owned launch")
+            run = connection.execute(
+                "SELECT record_json FROM runs WHERE run_id = ?", (envelope["run_id"],)
+            ).fetchone()
+            if run is None or envelope["captured_by"] != json.loads(run[0])["principal_id"]:
+                raise StorageError("return capture principal does not match the run controller")
+            attempt_record = json.loads(attempt["record_json"])
+            if (
+                envelope.get("selected_template") != attempt_record["selected_template"]
+                or envelope.get("reply_to") != launch["dispatch_envelope_id"]
+                or envelope.get("provider_thread_id") != launch["provider_thread_id"]
+                or envelope.get("from") != "worker:" + attempt_record["selected_template"]
+            ):
+                raise StorageError(
+                    "report does not match the selected template and dispatched launch"
+                )
             existing = connection.execute(
                 "SELECT * FROM envelopes WHERE dedup_key = ?", (dedup_key,)
             ).fetchone()
             if existing:
-                if existing["body_sha256"] == envelope["body_sha256"]:
+                if existing["body_sha256"] == envelope["body_sha256"] and existing[
+                    "record_json"
+                ] == self._json(envelope):
                     return {
                         "status": "captured",
                         "envelope_id": existing["envelope_id"],
@@ -211,15 +717,6 @@ class RuntimeStore:
                     "envelope_id": envelope["envelope_id"],
                     "original_envelope_id": existing["envelope_id"],
                 }
-            attempt = connection.execute(
-                "SELECT * FROM attempts WHERE attempt_id = ?", (envelope["attempt_id"],)
-            ).fetchone()
-            if (
-                attempt is None
-                or attempt["run_id"] != envelope["run_id"]
-                or attempt["task_id"] != envelope["task_id"]
-            ):
-                raise StorageError("envelope does not belong to an existing attempt")
             transition_errors = validate_attempt_transition(attempt["state"], new_state)
             if transition_errors:
                 raise StorageError("; ".join(transition_errors))
@@ -240,8 +737,23 @@ class RuntimeStore:
                 ),
             )
             connection.execute(
-                "UPDATE attempts SET state = ?, last_envelope_id = ? WHERE attempt_id = ?",
-                (new_state, envelope["envelope_id"], envelope["attempt_id"]),
+                "UPDATE attempts SET state = ?, last_envelope_id = ?, record_json = ? WHERE attempt_id = ?",
+                (
+                    new_state,
+                    envelope["envelope_id"],
+                    self._json(
+                        {
+                            **json.loads(attempt["record_json"]),
+                            "state": new_state,
+                            "last_envelope_id": envelope["envelope_id"],
+                        }
+                    ),
+                    envelope["attempt_id"],
+                ),
+            )
+            connection.execute(
+                "UPDATE workspace_reservations SET state=? WHERE attempt_id=?",
+                (new_state, envelope["attempt_id"]),
             )
             self._append_event(connection, envelope, dedup_key, "result_captured")
             return {"status": "captured", "envelope_id": envelope["envelope_id"], "replayed": False}
@@ -283,6 +795,9 @@ class RuntimeStore:
             "events",
             "decisions",
             "workspace_reservations",
+            "attempt_lineage",
+            "format_corrections",
+            "validations",
         }:
             raise ValueError("unknown table")
         with self._connect() as connection:
@@ -301,6 +816,134 @@ class RuntimeStore:
                 "SELECT state FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
             return None if row is None else row[0]
+
+    def record_decision(self, run_id, decision_id, family, decision, attempt_id, principal_id):
+        if family not in {"implementation", "specification", "quality"} or decision not in {
+            "accept",
+            "reject",
+            "format_correction",
+            "repair",
+            "escalate",
+        }:
+            raise StorageError("decision family or value is unsupported")
+        if not all(isinstance(value, str) and value for value in (attempt_id, principal_id)):
+            raise StorageError("decision requires a linked attempt and principal")
+        with self._mutation() as connection:
+            attempt = connection.execute(
+                "SELECT run_id, state, last_envelope_id FROM attempts WHERE attempt_id=?",
+                (attempt_id,),
+            ).fetchone()
+            run = connection.execute(
+                "SELECT record_json FROM runs WHERE run_id=?", (run_id,)
+            ).fetchone()
+            validation = connection.execute(
+                "SELECT valid, envelope_id, principal_id FROM validations WHERE attempt_id=?",
+                (attempt_id,),
+            ).fetchone()
+            if attempt is None or run is None or attempt["run_id"] != run_id:
+                raise StorageError("decision attempt is missing or belongs to another run")
+            if validation is None or (decision == "accept" and validation["valid"] != 1):
+                raise StorageError("orchestrator decision requires a recorded machine validation")
+            if decision == "accept" and attempt["state"] != "validated":
+                raise StorageError("acceptance requires a machine-validated attempt")
+            if validation["envelope_id"] != attempt["last_envelope_id"]:
+                raise StorageError("decision evidence is not the validated return")
+            expected_prefix = {
+                "implementation": "impl-",
+                "specification": "spec-",
+                "quality": "quality-",
+            }[family]
+            launch = connection.execute(
+                "SELECT a.record_json FROM attempts a WHERE a.attempt_id=?", (attempt_id,)
+            ).fetchone()
+            selected_template = json.loads(launch[0])["selected_template"]
+            if not selected_template.startswith(expected_prefix):
+                raise StorageError("decision family does not match the attempted worker role")
+            run_principal = json.loads(run[0])["principal_id"]
+            if principal_id != run_principal or principal_id != validation["principal_id"]:
+                raise StorageError(
+                    "decision principal does not match the recorded controller principal"
+                )
+            record = {
+                "decision_id": decision_id,
+                "family": family,
+                "decision": decision,
+                "attempt_id": attempt_id,
+                "evidence_ref": validation["envelope_id"],
+                "principal_id": principal_id,
+            }
+            connection.execute(
+                "INSERT INTO decisions(decision_id, run_id, attempt_id, record_json) VALUES (?, ?, ?, ?)",
+                (decision_id, run_id, attempt_id, self._json(record)),
+            )
+
+    def validate_accepted_outcome(self, outcome, controller_principal, captured_evidence_refs):
+        """Validate all accepted-outcome references against records in this store."""
+        with self._connect() as connection:
+            decisions = {}
+            for row in connection.execute(
+                "SELECT decision_id, record_json FROM decisions WHERE run_id=?",
+                (outcome.get("run_id"),),
+            ):
+                decisions[row["decision_id"]] = json.loads(row["record_json"])
+            attempts = {
+                row["attempt_id"]: row
+                for row in connection.execute(
+                    "SELECT attempt_id, run_id, state, last_envelope_id FROM attempts WHERE run_id=?",
+                    (outcome.get("run_id"),),
+                )
+            }
+            evidence = {
+                row["envelope_id"]
+                for row in connection.execute(
+                    "SELECT envelope_id FROM envelopes WHERE run_id=?", (outcome.get("run_id"),)
+                )
+            }
+            run_row = connection.execute(
+                "SELECT record_json FROM runs WHERE run_id=?", (outcome.get("run_id"),)
+            ).fetchone()
+        if run_row is None:
+            return ["accepted outcome references an unknown run"]
+        run_principal = json.loads(run_row[0])["principal_id"]
+        required_families = {"implementation", "specification", "quality"}
+        referenced_decisions = outcome.get("orchestrator_decision_refs", [])
+        decision_records = [decisions[ref] for ref in referenced_decisions if ref in decisions]
+        accepted_families = {
+            item["family"] for item in decision_records if item["decision"] == "accept"
+        }
+        if not required_families.issubset(accepted_families):
+            return [
+                "accepted outcome requires implementation, specification, and quality decisions"
+            ]
+        errors = validate_outcome(
+            outcome,
+            controller_principal,
+            set(captured_evidence_refs).intersection(evidence),
+        )
+        if errors:
+            return errors
+        if not set(outcome["validated_attempt_refs"]).issubset(attempts):
+            return ["accepted outcome references an unknown or unrelated attempt"]
+        if any(attempts[ref]["state"] != "validated" for ref in outcome["validated_attempt_refs"]):
+            return ["accepted outcome references an attempt that is not machine-validated"]
+        if not set(outcome["orchestrator_decision_refs"]).issubset(decisions):
+            return ["accepted outcome references a missing orchestrator decision"]
+        if {item.get("attempt_id") for item in decision_records} != set(
+            outcome["validated_attempt_refs"]
+        ):
+            return ["accepted outcome decisions are not linked to exactly its validated attempts"]
+        if any(item.get("principal_id") != run_principal for item in decision_records):
+            return ["accepted outcome includes a decision from a different principal"]
+        if any(
+            attempts[item["attempt_id"]]["last_envelope_id"] != item.get("evidence_ref")
+            for item in decision_records
+        ):
+            return ["accepted outcome decision does not reference its attempt's validated evidence"]
+        if not {item["evidence_ref"] for item in decision_records}.issubset(
+            set(captured_evidence_refs)
+        ):
+            return ["accepted outcome decision evidence is not controller-captured"]
+        return []
 
     def export(self, destination, fail_after=None):
         """Generate disposable exports; this method never reads existing exports."""
