@@ -461,4 +461,6 @@ These assertions describe required observations; tests must induce the failures 
 
 For each task, record the owner, scoped files, test command/output, evidence location, remaining limitations, and reviewed commit when one exists. Check a task off only when its acceptance conditions are met; do not count a plan, generated template, or mocked host as a live result. Keep blocked tasks open with the precise missing prerequisite and continue independent work.
 
+Use one fresh consolidated review boundary per task. Request a scoped re-review only after that reviewer identifies a significant issue and its fix is complete; do not schedule separate specification and quality review passes by default.
+
 Implementation may use delegated workers or an inline task loop, while preserving the same root-owned Git and review gates. This planning session does not select workers, start implementation, install plugins, or run live models.
