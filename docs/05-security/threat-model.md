@@ -2,7 +2,7 @@
 title: Threat Model
 status: active
 owner: root-architect-execution maintainers
-last_reviewed: 2026-09-17
+last_reviewed: 2026-09-20
 ---
 
 # Threat Model
@@ -21,3 +21,10 @@ last_reviewed: 2026-09-17
 | Python <3.12 skips TOML checks | Invalid Codex TOML can ship | CI on 3.12–3.14; explicit degraded-path warning | Local contributors can still run partial checks if they ignore warning. |
 | Permission tests run as root | Fail-closed tests silently skip | CI refuses uid 0 | Local root runs remain unsafe evidence. |
 | Unlimited retry/model escalation | Cost blowout / non-termination | max attempts, recorded escalation evidence, stop conditions | Human can explicitly choose further work. |
+| Forged or stale preflight record admits a run | An ungoverned session appears governed | Admission binds literal boolean status to run, host, controller session, catalog, configuration, and current capability evidence | Same-user access still requires a proven controller boundary; legacy files are untrusted exports. |
+| Empty or fabricated tool observation passes preflight | Root can dispatch without the required restricted path | Required delegation capability is explicit; unavailable or unknown blocks admission | A host may not expose the facts needed for runtime acceptance. |
+| Direct dispatch bypasses admission | An open dispatch exists without a governed run | Every dispatch entry point uses the same admission service | Compatibility commands remain unsafe until migrated. |
+| Two active worker tasks share a workspace | Concurrent writes make attribution and recovery unreliable | One authoritative reservation remains held until stop is confirmed or work is isolated | A timed-out worker can remain `stop_unknown`; replacement stays blocked. |
+| Fake or reused report completes a task | Incorrect or fabricated work becomes accepted evidence | Controller captures immutable raw result and binds envelope, task, attempt, route, and provider identity in one transaction | Content validation cannot prove business correctness; orchestrator and root gates remain required. |
+| Worker sends a result directly to root | The orchestrator is bypassed | Route validation accepts worker reports/questions only to the orchestrator | Root may relay operator answers through the orchestrator. |
+| Worker can alter controller state or evidence | A same-user worker forges admission, results, or decisions | Independently proven storage/control isolation and authenticated controller operations | File permissions alone are insufficient with shared identities or shell access. |
