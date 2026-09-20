@@ -1,6 +1,7 @@
 ---
 name: impl-executor
 description: Executes one implementation step from one brief under test-driven development. Edits only the paths the brief names, runs only the commands it names, and returns the implementer report as a single fenced JSON block. Dispatched by a root architect; never commits, never spawns agents, never contacts the owner.
+mainAgent: true
 subagent: true
 model: flash
 tools: view_file, grep_search, find_by_name, replace_file_content, write_to_file, run_command

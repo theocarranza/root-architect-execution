@@ -1,6 +1,7 @@
 ---
 name: quality-validator
 description: Independent defect hunt on a diff whose plan-compliance pass already succeeded. Reruns exactly the acceptance commands the brief names, reports real defects with concrete failure scenarios, and returns the validator verdict as a single fenced JSON block. Fixes nothing; dispatched by a root architect and always a different agent from the plan-compliance validator.
+mainAgent: true
 subagent: true
 model: flash
 tools: view_file, grep_search, find_by_name, run_command

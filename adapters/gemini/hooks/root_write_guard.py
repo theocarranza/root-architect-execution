@@ -121,12 +121,61 @@ def _check_command_line(cmd: str, root: Path, owned_paths: list[Path]) -> str | 
     return None
 
 
+_POSIX_MUTATION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\b(?:sed\s+.*(?:-i|--in-place))\b.*(?:\b|/)(?:lib|functions)/"),
+    re.compile(r"\b(?:cp|mv|rm|touch|truncate|patch|install|dd)\b.*(?:\b|/)(?:lib|functions)/"),
+]
+
+_INTERPRETER_MUTATION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(?:python3?|node|ruby|perl|bash|sh|zsh)\s+.*-c\s+.*(?:\b|/)(?:lib|functions)/"),
+    re.compile(r"(?:python3?|node|ruby|perl|bash|sh|zsh)\s+.*-e\s+.*(?:\b|/)(?:lib|functions)/"),
+    re.compile(r"(?:python3?|bash|sh|zsh)\s+\S+\.(?:py|sh)\b.*(?:\b|/)(?:lib|functions)/"),
+    re.compile(r"open\s*\(\s*['\"][^'\"]*(?:lib|functions)/"),
+    re.compile(r"open\s*\([^)]*['\"][wa+]"),
+    re.compile(r"(?:writeFileSync|createWriteStream)\s*\(\s*['\"][^'\"]*(?:lib|functions)/"),
+    re.compile(r"Path\s*\(\s*['\"][^'\"]*(?:lib|functions)/[^'\"]*['\"]\s*\)\.write_"),
+]
+
+HARD_STOP_PRODUCT_DENIAL = (
+    "Root write guard [Guard 2 — product-code write block]:\n"
+    "DENIED: Root attempted to modify protected product code in a protected product directory.\n\n"
+    "Root Architect mode is active.\n\n"
+    "Do not retry this operation using:\n"
+    "- run_command\n"
+    "- Python\n"
+    "- shell scripts\n"
+    "- sed\n"
+    "- interpreters\n"
+    "- alternate file tools\n"
+    "- indirect subprocesses\n\n"
+    "Required action:\n"
+    "1. Dispatch `orchestrator` through the approved subagent mechanism.\n"
+    "2. If `orchestrator` is unavailable, mark the session BLOCKED and stop implementation.\n\n"
+    "This denial represents an architectural boundary, not a tool limitation."
+)
+
+
 def _check_shell_product_write(cmd: str) -> str | None:
-    """Detect shell redirection or write targeting protected product code."""
+    """Detect shell redirection, file utility mutation, or interpreter execution targeting protected product code."""
     for seg in _PROTECTED_FIRST_SEGMENTS:
-        pattern = rf"(?:>|>>|\btee\b\s+)(?:[^\w\s/.-]*\s*)?(?:{seg}/|[^\w\s/.-]*\b{seg}/)"
+        pattern = rf"(?:>|>>|\btee\b\s+(?:-a\s+)?)(?:[^\w\s/.-]*\s*)?(?:{seg}/|[^\w\s/.-]*\b{seg}/)"
         if re.search(pattern, cmd):
             return seg
+
+    for pattern in _POSIX_MUTATION_PATTERNS:
+        if pattern.search(cmd):
+            for seg in _PROTECTED_FIRST_SEGMENTS:
+                if f"{seg}/" in cmd:
+                    return seg
+            return "lib"
+
+    for pattern in _INTERPRETER_MUTATION_PATTERNS:
+        if pattern.search(cmd):
+            for seg in _PROTECTED_FIRST_SEGMENTS:
+                if f"{seg}/" in cmd:
+                    return seg
+            return "lib"
+
     return None
 
 
@@ -184,11 +233,7 @@ def main() -> int:
             if caller_role in ("root", "orchestrator"):
                 hit_seg = _check_shell_product_write(cmd_line)
                 if hit_seg:
-                    return _deny(
-                        f"Root write guard [Guard 2 — product-code write block]: command line writes "
-                        f"to protected product directory ('{hit_seg}/'). Root must never write product "
-                        f"code directly via shell."
-                    )
+                    return _deny(HARD_STOP_PRODUCT_DENIAL)
 
     # ------------------------------------------------------------------
     # GUARD 2: Direct file writes to state files or protected product dirs
@@ -215,13 +260,7 @@ def main() -> int:
 
                 # Product code protection: root and orchestrator must never edit product code
                 if _is_protected_product_path(target, root) and caller_role not in WORKER_ROLES:
-                    return _deny(
-                        f"Root write guard [Guard 2 — product-code write block]: '{target_file}' "
-                        f"is under a protected product directory (lib/ or functions/). Root must never "
-                        f"write product code directly — delegate via `scripts/job_queue.py` to a worker "
-                        f"dispatch. Worker subagents must carry AGENT_ROLE=worker (or implementer) in "
-                        f"their environment. (caller={caller_role!r})"
-                    )
+                    return _deny(HARD_STOP_PRODUCT_DENIAL)
 
     # ------------------------------------------------------------------
     # DISPATCH STATE VERIFICATION & WRITE-PATH CHECK

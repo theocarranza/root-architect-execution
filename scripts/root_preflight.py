@@ -201,6 +201,47 @@ def find_gemini_hooks_json(workspace):
     return None
 
 
+def find_gemini_agent_md(workspace, agent_name="orchestrator"):
+    root = Path(__file__).resolve().parent.parent
+    for candidate in (
+        Path(workspace) / "agents" / f"{agent_name}.md",
+        Path(workspace) / "dist" / "gemini" / "agents" / f"{agent_name}.md",
+        root / "agents" / f"{agent_name}.md",
+        root / "adapters" / "gemini" / "agents" / f"{agent_name}.md",
+        root / "dist" / "gemini" / "agents" / f"{agent_name}.md",
+        Path.home() / ".gemini" / "config" / "plugins" / "root-architect-execution" / "agents" / f"{agent_name}.md",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def verify_gemini_agent_registration(workspace):
+    agent_path = find_gemini_agent_md(workspace, "orchestrator")
+    if not agent_path:
+        return [
+            "no orchestrator.md agent definition found for Gemini host runtime. "
+            "Required Root Architect subagent topology is unavailable."
+        ]
+    try:
+        content = agent_path.read_text(encoding="utf-8")
+    except Exception as e:
+        return ["orchestrator.md cannot be read (%s)" % e]
+
+    errors = []
+    if "subagent: true" not in content:
+        errors.append(
+            "orchestrator.md lacks 'subagent: true' frontmatter: "
+            "orchestrator cannot be spawned as a subagent."
+        )
+    if "mainAgent: true" not in content:
+        errors.append(
+            "orchestrator.md lacks 'mainAgent: true' frontmatter: "
+            "Antigravity will not discover orchestrator in session subagent roster."
+        )
+    return errors
+
+
 def verify_gemini_runtime_guards(workspace):
     hooks_path = find_gemini_hooks_json(workspace)
     if not hooks_path:
@@ -238,6 +279,7 @@ def verify_gemini_runtime_guards(workspace):
             "Gemini hooks.json lacks 'root_write_guard.py' in PreToolUse: "
             "Root writes are not physically blocked during open dispatches."
         )
+    errors.extend(verify_gemini_agent_registration(workspace))
     return errors
 
 

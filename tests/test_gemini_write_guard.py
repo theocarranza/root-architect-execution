@@ -253,6 +253,66 @@ class TestGeminiWriteGuard(unittest.TestCase):
                 "dispatch state files under .root-architect/state/", result.get("reason", "")
             )
 
+    def test_root_cannot_write_product_code_via_python_or_scripts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            failing_cmds = [
+                "python3 -c \"open('lib/foo.dart', 'w').write('bar')\"",
+                "python3 -c \"with open('lib/feature.dart', 'w') as f: f.write('1')\"",
+                "python3 -c \"import os; open('functions/index.js', 'w').write('x')\"",
+                "node -e \"fs.writeFileSync('lib/app.dart', 'x')\"",
+                "bash write_code.sh lib/feature.dart",
+                "sed -i 's/foo/bar/' lib/main.dart",
+                "sed --in-place 's/foo/bar/' functions/main.py",
+                "cp dummy.dart lib/target.dart",
+                "mv dummy.dart lib/target.dart",
+                "rm lib/old.dart",
+                "touch lib/new.dart",
+            ]
+            for cmd in failing_cmds:
+                with self.subTest(cmd=cmd):
+                    payload = {
+                        "workspacePaths": [tmpdir],
+                        "toolCall": {
+                            "name": "run_command",
+                            "args": {"CommandLine": cmd},
+                        },
+                    }
+                    code, result = self.run_guard(payload)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(result.get("decision"), "deny")
+                    reason = result.get("reason", "")
+                    self.assertIn("Root attempted to modify protected product code", reason)
+                    self.assertIn("architectural boundary", reason)
+                    self.assertIn("Do not retry this operation using", reason)
+
+    def test_root_can_run_read_only_commands_referencing_protected_dirs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            allowed_cmds = [
+                "git diff lib/",
+                "git diff functions/",
+                "git status lib/main.dart",
+                "git log -n 5 lib/feature.dart",
+                "ls -la lib/",
+                "cat lib/feature.dart",
+                "grep -rn 'class' lib/",
+                "find lib/ -name '*.dart'",
+                "pytest",
+                "python3 -m unittest discover tests",
+                "python3 scripts/root_preflight.py --status",
+            ]
+            for cmd in allowed_cmds:
+                with self.subTest(cmd=cmd):
+                    payload = {
+                        "workspacePaths": [tmpdir],
+                        "toolCall": {
+                            "name": "run_command",
+                            "args": {"CommandLine": cmd},
+                        },
+                    }
+                    code, result = self.run_guard(payload)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(result.get("decision"), "allow")
+
 
 if __name__ == "__main__":
     unittest.main()

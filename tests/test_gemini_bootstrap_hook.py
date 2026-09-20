@@ -103,7 +103,7 @@ class TestGeminiSessionBootstrapHook(unittest.TestCase):
             self.assertEqual(len(result["injectSteps"]), 1)
             self.assertIn("Root Architect Mode", result["injectSteps"][0]["ephemeralMessage"])
 
-    def test_turn_greater_than_one_zero_overhead(self):
+    def test_turn_greater_than_one_persistent_injection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root_dir = Path(tmpdir) / ".root-architect"
             root_dir.mkdir()
@@ -115,7 +115,8 @@ class TestGeminiSessionBootstrapHook(unittest.TestCase):
             }
             code, result = self.run_hook(payload)
             self.assertEqual(code, 0)
-            self.assertEqual(result, {"injectSteps": []})
+            self.assertEqual(len(result["injectSteps"]), 1)
+            self.assertIn("Root Architect Mode", result["injectSteps"][0]["ephemeralMessage"])
 
     def test_malformed_input_fails_safe(self):
         code, result = self.run_hook("NOT JSON AT ALL")

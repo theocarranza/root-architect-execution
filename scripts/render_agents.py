@@ -541,10 +541,15 @@ def render_markdown_yaml(role, host, role_file):
     lines = ["---", "name: %s" % role["id"], "description: %s" % role["description"]]
     if caps.get("subagent_flag", {}).get("supported"):
         flag = caps["subagent_flag"]
-        key = _SUBAGENT_HEADER_FIELDS[is_dispatched(role)]
-        field = flag.get(key, flag.get("field"))
-        if field:
-            lines.append("%s: true" % field)
+        dispatched = is_dispatched(role)
+        if dispatched and flag.get("dispatched_fields"):
+            for f in flag["dispatched_fields"]:
+                lines.append("%s: true" % f)
+        else:
+            key = _SUBAGENT_HEADER_FIELDS[dispatched]
+            field = flag.get(key, flag.get("field"))
+            if field:
+                lines.append("%s: true" % field)
 
     model = host["model_map"][role["model"]["default"]]
     effort = None

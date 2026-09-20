@@ -153,6 +153,12 @@
             "dispatched_field": {
               "type": ["string", "null"]
             },
+            "dispatched_fields": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "verified": {
               "type": "string",
               "minLength": 1

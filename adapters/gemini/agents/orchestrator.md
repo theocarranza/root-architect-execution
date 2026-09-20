@@ -1,6 +1,7 @@
 ---
 name: orchestrator
 description: Runs one dispatch to completion on root's behalf. Delegates each task to a worker subagent, reads what comes back and judges it, decides what to delegate next, and asks root through the mailbox when it needs something only root can give. Never edits source, never commits, never speaks to the operator directly. Returns the orchestrator outcome as a single fenced JSON block.
+mainAgent: true
 subagent: true
 model: pro
 tools: view_file, grep_search, find_by_name, run_command, invoke_subagent, send_message, manage_subagents
