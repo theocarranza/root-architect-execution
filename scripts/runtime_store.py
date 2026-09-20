@@ -7,7 +7,6 @@ callers and must only be reached through a host boundary that can prove one.
 import contextlib
 import hashlib
 import json
-import os
 import sqlite3
 from pathlib import Path
 
