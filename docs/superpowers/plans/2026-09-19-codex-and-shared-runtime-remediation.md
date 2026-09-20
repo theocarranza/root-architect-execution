@@ -249,12 +249,12 @@ These assertions describe required observations; tests must induce the failures 
 **Files:** modify `scripts/mailbox.py`, `scripts/check_return.py`, `schemas/envelope.schema.json`, and `schemas/orchestrator-outcome.schema.json`; create `tests/test_runtime_envelopes.py` and `tests/test_runtime_returns.py`.
 
 - [ ] Make mailbox mutation a service operation. Preserve legacy listing/verification as explicitly legacy commands; do not let `post --persisted-by orchestrator` mint trusted evidence.
-- [ ] Capture final message text using a declared encoding without trimming, fence repair, newline conversion, or model paraphrase. Retain raw provider metadata separately from the portable text body.
-- [ ] Validate record identity, sender/recipient route, kind, `reply_to`, body hash, selected template, and task/attempt linkage before accepting a result for a task.
+- [x] Capture final message text using a declared encoding without trimming, fence repair, newline conversion, or model paraphrase. Retain raw provider metadata separately from the portable text body.
+- [x] Validate record identity, sender/recipient route, kind, `reply_to`, body hash, selected template, and task/attempt linkage before accepting a result for a task.
 - [ ] Require `check_return.py` in governed runs to load a captured envelope by identity. Reject extra prose/multiple fences under the strict return contract; keep malformed original bytes before any format-correction request.
-- [ ] Validate top-level JSON type before cross-field checks. Reject wrong model/effort claims against recorded effective configuration where observable, and never infer effective configuration from the worker's own report.
-- [ ] Make task-report pairing one-to-one per attempt. A repeated role name or reused report must not satisfy a later task. Reject wrong-kind and wrong-run envelopes even when files and hashes exist.
-- [ ] Distinguish a worker's reported failure from a controller's missing-result failure. Record test command output, exit status, and tested-tree fingerprints as execution evidence, not solely worker-written pass counts.
+- [x] Validate top-level JSON type before cross-field checks. Reject wrong model/effort claims against recorded effective configuration where observable, and never infer effective configuration from the worker's own report.
+- [x] Make task-report pairing one-to-one per attempt. A repeated role name or reused report must not satisfy a later task. Reject wrong-kind and wrong-run envelopes even when files and hashes exist.
+- [x] Distinguish a worker's reported failure from a controller's missing-result failure. Record test command output, exit status, and tested-tree fingerprints as execution evidence, not solely worker-written pass counts.
 
 **Validation:** `python3 -m unittest tests.test_runtime_envelopes tests.test_runtime_returns -v`. Include fake files, body-only corruption, body-plus-hash replacement attempts, mismatched recipients, empty output, and two tasks assigned to the same role.
 

@@ -7,42 +7,32 @@
   "required": ["schema_version", "run_id", "outcome", "rationale"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": 2 },
-    "run_id": {
-      "type": "string",
-      "minLength": 1
-    },
-    "outcome": {
-      "type": "string",
-      "enum": ["accepted", "rejected", "blocked", "abandoned"],
-      "description": "accepted: every dispatched task came back and the orchestrator judged the work done. rejected: a validator verdict stands against the work and retries are exhausted. blocked: the orchestrator needs something only root or the operator can supply and has said so through the mailbox. abandoned: the run stopped without a judgment - a cap, a crash, an interrupt. 'abandoned' exists so that a run which merely stopped can never be recorded as one that finished."
-    },
-    "validated_attempt_refs": {
+    "schema_version": {"type": "integer", "const": 2},
+    "run_id": {"type": "string", "minLength": 1},
+    "outcome": {"type": "string", "enum": ["accepted", "rejected", "blocked", "abandoned"]},
+    "validated_attempt_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "orchestrator_decision_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "execution_evidence": {
       "type": "array",
       "minItems": 1,
-      "uniqueItems": true,
-      "items": { "type": "string", "minLength": 1 }
+      "description": "Controller-recorded command observations; worker pass counts alone are not execution evidence.",
+      "items": {
+        "type": "object",
+        "required": ["evidence_ref", "captured_by", "capture_source", "command", "output", "exit_status", "tested_tree_fingerprint"],
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ref": {"type": "string", "minLength": 1},
+          "captured_by": {"type": "string", "pattern": "^controller:[a-z][a-z0-9-]*$"},
+          "capture_source": {"const": "controller"},
+          "command": {"type": "string", "minLength": 1},
+          "output": {"type": "string"},
+          "exit_status": {"type": "integer"},
+          "tested_tree_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
     },
-    "orchestrator_decision_refs": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": { "type": "string", "minLength": 1 }
-    },
-    "rationale": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Why this outcome and not another, in the orchestrator's own words. This is the one field that is judgment rather than record, and it is required: an outcome with no reasoning behind it cannot be argued with, only accepted."
-    },
-    "blocked_reason": {
-      "type": "string",
-      "minLength": 1
-    },
-    "question_or_failure_refs": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": { "type": "string", "minLength": 1 }
-    }
+    "rationale": {"type": "string", "minLength": 1},
+    "blocked_reason": {"type": "string", "minLength": 1},
+    "question_or_failure_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
   }
 }

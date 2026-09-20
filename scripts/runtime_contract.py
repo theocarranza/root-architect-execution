@@ -112,7 +112,7 @@ def validate_attempt_transition(previous_state, current_state):
 
 
 def validate_answer_for_attempt(record, expected_attempt, controller_principal):
-    """Ensure a captured return cannot be reused for another task or attempt."""
+    """Bind a captured return to controller-owned dispatch and attempt state."""
     errors = validate_envelope(record, controller_principal)
     if errors:
         return errors
@@ -123,11 +123,25 @@ def validate_answer_for_attempt(record, expected_attempt, controller_principal):
     for field in ("run_id", "task_id", "attempt_id"):
         if record[field] != expected_attempt.get(field):
             return ["envelope %s does not match expected %s" % (field, field)]
+    dispatch_id = expected_attempt.get("dispatched_envelope_id")
+    if not isinstance(dispatch_id, str) or not dispatch_id:
+        return ["expected attempt lacks a controller-owned dispatched envelope id"]
+    if record["reply_to"] != dispatch_id:
+        return ["envelope reply_to does not identify the dispatched task"]
+    selected_template = expected_attempt.get("selected_template")
+    if not isinstance(selected_template, str) or not selected_template:
+        return ["expected attempt lacks a controller-owned selected template"]
+    if record.get("selected_template") != selected_template:
+        return ["envelope selected_template does not match the dispatched attempt"]
     return []
 
 
-def validate_outcome(record):
-    """Validate v2 evidence references required for an orchestrator outcome."""
+def validate_outcome(record, controller_principal=None, captured_evidence_refs=None):
+    """Validate v2 outcome evidence against controller-owned capture context.
+
+    The caller must supply trusted controller context for accepted outcomes;
+    this offline validator does not authenticate that context itself.
+    """
     errors = validate_record("outcome", record)
     if errors:
         return errors
@@ -137,6 +151,21 @@ def validate_outcome(record):
             return ["accepted outcome requires validated attempt references"]
         if not record.get("orchestrator_decision_refs"):
             return ["accepted outcome requires orchestrator decision references"]
+        if not record.get("execution_evidence"):
+            return ["accepted outcome requires concrete execution evidence"]
+        if not isinstance(controller_principal, str) or not controller_principal.startswith(
+            "controller:"
+        ):
+            return ["accepted outcome requires trusted controller capture context"]
+        if not isinstance(captured_evidence_refs, (set, frozenset, list, tuple)):
+            return ["accepted outcome requires controller-owned captured evidence references"]
+        for evidence in record["execution_evidence"]:
+            if evidence["captured_by"] != controller_principal:
+                return ["execution evidence captured_by does not match the trusted controller"]
+            if evidence["evidence_ref"] not in captured_evidence_refs:
+                return ["execution evidence reference is not in controller-owned captured evidence"]
+            if not evidence["command"].strip() or not evidence["output"].strip():
+                return ["execution evidence requires a concrete command and output"]
     if outcome == "blocked":
         if not record.get("blocked_reason"):
             return ["blocked outcome requires a reason"]

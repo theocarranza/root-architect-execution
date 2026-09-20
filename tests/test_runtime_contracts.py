@@ -88,6 +88,32 @@ class RuntimeContractTests(unittest.TestCase):
         )
         self.assert_invalid(errors)
 
+    def test_return_binds_dispatch_envelope_and_selected_template(self):
+        dispatched = {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "dispatched_envelope_id": "env-task-1",
+            "selected_template": "impl-executor-cheap",
+        }
+        self.assertEqual(
+            [],
+            runtime_contract.validate_answer_for_attempt(
+                envelope(selected_template="impl-executor-cheap"),
+                dispatched,
+                "controller:local-1",
+            ),
+        )
+        for returned in (
+            envelope(reply_to="env-task-other", selected_template="impl-executor-cheap"),
+            envelope(selected_template="impl-executor-mid"),
+        ):
+            self.assert_invalid(
+                runtime_contract.validate_answer_for_attempt(
+                    returned, dispatched, "controller:local-1"
+                )
+            )
+
     def test_attempt_rejects_an_invented_template(self):
         errors = runtime_contract.validate_attempt(
             attempt(selected_template="invented-template"), {"impl-executor-cheap"}
@@ -178,8 +204,25 @@ class RuntimeContractTests(unittest.TestCase):
             "rationale": "validated",
             "validated_attempt_refs": ["attempt-1"],
             "orchestrator_decision_refs": ["decision-1"],
+            "execution_evidence": [
+                {
+                    "evidence_ref": "env-command-1",
+                    "captured_by": "controller:local-1",
+                    "capture_source": "controller",
+                    "command": "python3 -m unittest",
+                    "output": "OK",
+                    "exit_status": 0,
+                    "tested_tree_fingerprint": "a" * 64,
+                }
+            ],
         }
-        self.assertEqual([], runtime_contract.validate_outcome(accepted))
+        self.assertEqual(
+            [],
+            runtime_contract.validate_outcome(accepted, "controller:local-1", {"env-command-1"}),
+        )
+        no_execution_evidence = copy.deepcopy(accepted)
+        no_execution_evidence.pop("execution_evidence")
+        self.assert_invalid(runtime_contract.validate_outcome(no_execution_evidence))
         self.assert_invalid(
             runtime_contract.validate_outcome(
                 {
@@ -204,3 +247,33 @@ class RuntimeContractTests(unittest.TestCase):
         missing_evidence = copy.deepcopy(blocked)
         missing_evidence.pop("question_or_failure_refs")
         self.assert_invalid(runtime_contract.validate_outcome(missing_evidence))
+
+    def test_accepted_outcome_rejects_worker_copyable_execution_evidence(self):
+        accepted = {
+            "schema_version": 2,
+            "run_id": "run-1",
+            "outcome": "accepted",
+            "rationale": "validated",
+            "validated_attempt_refs": ["attempt-1"],
+            "orchestrator_decision_refs": ["decision-1"],
+            "execution_evidence": [
+                {
+                    "evidence_ref": "worker-claimed-capture",
+                    "captured_by": "controller:local-1",
+                    "capture_source": "controller",
+                    "command": "python3 -m unittest",
+                    "output": "OK",
+                    "exit_status": 0,
+                    "tested_tree_fingerprint": "a" * 64,
+                }
+            ],
+        }
+        self.assert_invalid(
+            runtime_contract.validate_outcome(accepted, "controller:local-1", set())
+        )
+        self.assertEqual(
+            [],
+            runtime_contract.validate_outcome(
+                accepted, "controller:local-1", {"worker-claimed-capture"}
+            ),
+        )

@@ -120,6 +120,27 @@ def validate_header(header):
         raise MailboxError("failure_mode belongs only on a failure envelope")
 
 
+def _governed_capture_unavailable(workspace):
+    """Fail closed until a host can authenticate the controller service.
+
+    A value supplied as ``persisted_by`` is metadata from an untrusted command
+    line, not evidence that the controller captured anything.  RuntimeService
+    deliberately exposes this boundary as unsupported today.
+    """
+    from runtime_service import RuntimeService
+
+    # Do not construct RuntimeStore merely to discover that capture is
+    # unsupported: creating a local database would itself be an unrequested
+    # mutation.  This is the service's declared current capability result.
+    result = RuntimeService._unsupported()
+    if result.get("status") == "unsupported_boundary":
+        raise MailboxError(
+            "governed mailbox mutation is unsupported: authenticated controller "
+            "identity is not available"
+        )
+    raise MailboxError("governed mailbox mutation did not return trusted capture evidence")
+
+
 def envelope_paths(directory):
     if not directory.is_dir():
         return []
@@ -150,8 +171,38 @@ def next_seq(directory):
 
 
 def post(
-    workspace, run_id, kind, sender, recipient, persisted_by, body, failure_mode=None, seq=None
+    workspace,
+    run_id,
+    kind,
+    sender,
+    recipient,
+    persisted_by,
+    body,
+    failure_mode=None,
+    seq=None,
+    **_fields,
 ):
+    """Request governed capture through the service, never through a CLI claim."""
+    _governed_capture_unavailable(workspace)
+
+
+def legacy_post(
+    workspace,
+    run_id,
+    kind,
+    sender,
+    recipient,
+    persisted_by,
+    body,
+    failure_mode=None,
+    seq=None,
+    **fields,
+):
+    """Write a historic file mailbox record for forensic compatibility only.
+
+    This function is deliberately named legacy: its caller cannot authenticate
+    a controller and its output must never satisfy a governed runtime task.
+    """
     directory = mailbox_dir(workspace, run_id)
     directory.mkdir(parents=True, exist_ok=True)
     seq = next_seq(directory) if seq is None else seq
@@ -168,6 +219,16 @@ def post(
     }
     if failure_mode:
         header["failure_mode"] = failure_mode
+    for field in (
+        "envelope_id",
+        "task_id",
+        "attempt_id",
+        "reply_to",
+        "selected_template",
+        "body_encoding",
+    ):
+        if field in fields and fields[field] is not None:
+            header[field] = fields[field]
     validate_header(header)
 
     safe_sender = sender.replace(":", "-")
@@ -185,7 +246,7 @@ def post(
     return path
 
 
-def read_all(workspace, run_id):
+def legacy_read_all(workspace, run_id):
     out = []
     for path in envelope_paths(mailbox_dir(workspace, run_id)):
         header, body = parse_envelope(path.read_bytes())
@@ -193,12 +254,17 @@ def read_all(workspace, run_id):
     return out
 
 
-def verify(workspace, run_id):
-    """Every way an envelope can lie, checked."""
+# Compatibility imports in old diagnostics remain explicitly legacy at their
+# definition site.  New governed callers must use the service boundary above.
+read_all = legacy_read_all
+
+
+def legacy_verify(workspace, run_id):
+    """Check historic files as hostile input, never as governed evidence."""
     problems = []
     seen_seq = {}
     tasks = {}
-    answered = set()
+    answers = {}
 
     directory = mailbox_dir(workspace, run_id)
     if not directory.is_dir():
@@ -221,6 +287,11 @@ def verify(workspace, run_id):
                 "can be trusted verbatim" % name
             )
 
+        problems.append(
+            "%s: legacy file mailbox record is not governed evidence; a claimed "
+            "persisted_by value cannot authenticate a controller" % name
+        )
+
         if header["run_id"] != run_id:
             problems.append(
                 "%s: filed under run %s but claims run %s" % (name, run_id, header["run_id"])
@@ -232,19 +303,48 @@ def verify(workspace, run_id):
         seen_seq[seq] = name
 
         if header["kind"] == "task":
-            tasks[header["to"]] = name
+            identity = header.get("envelope_id")
+            if identity:
+                if identity in tasks:
+                    problems.append("%s: duplicate task envelope identity %s" % (name, identity))
+                tasks[identity] = (name, header)
         elif header["kind"] in ("report", "failure"):
-            answered.add(header["from"])
-
-    for worker, task_name in sorted(tasks.items()):
-        if worker not in answered:
+            if header["kind"] == "report" and header["to"] != "orchestrator":
+                problems.append("%s: invalid legacy route for report" % name)
+            if header["kind"] == "report" and not body:
+                problems.append("%s: worker reported empty output" % name)
+            reply_to = header.get("reply_to")
+            if reply_to:
+                if reply_to in answers:
+                    problems.append("%s: reply_to %s already has a result" % (name, reply_to))
+                answers[reply_to] = (name, header)
+        elif header.get("reply_to"):
             problems.append(
-                "%s was dispatched to %s and nothing came back. Silence is not "
-                "success: seal it with a failure envelope naming the mode, or "
-                "the run records a task that simply stopped existing." % (task_name, worker)
+                "%s: wrong result kind %s; only report or failure may answer a task"
+                % (name, header["kind"])
             )
 
+    for task_identity, (task_name, task_header) in sorted(tasks.items()):
+        answer = answers.get(task_identity)
+        if answer is None:
+            problems.append(
+                "%s has a controller missing result for task envelope %s"
+                % (task_name, task_identity)
+            )
+            continue
+        answer_name, answer_header = answer
+        for field in ("task_id", "attempt_id", "selected_template"):
+            if answer_header.get(field) != task_header.get(field):
+                problems.append(
+                    "%s: %s does not match dispatched task %s" % (answer_name, field, task_identity)
+                )
+        if answer_header.get("reply_to") != task_identity:
+            problems.append("%s: reply_to does not identify its dispatched task" % answer_name)
+
     return problems
+
+
+verify = legacy_verify
 
 
 def _fail(message):
@@ -299,7 +399,7 @@ def cmd_seal_failure(args):
 
 def cmd_list(args):
     try:
-        entries = read_all(args.workspace, args.run_id)
+        entries = legacy_read_all(args.workspace, args.run_id)
     except MailboxError as exc:
         return _fail(str(exc))
     if not entries:
@@ -320,17 +420,14 @@ def cmd_list(args):
 
 
 def cmd_verify(args):
-    problems = verify(args.workspace, args.run_id)
+    problems = legacy_verify(args.workspace, args.run_id)
     if problems:
         for problem in problems:
             print("  %s" % problem, file=sys.stderr)
         print("\n%d problem(s) in run %s" % (len(problems), args.run_id), file=sys.stderr)
         return 1
     count = len(envelope_paths(mailbox_dir(args.workspace, args.run_id)))
-    print(
-        "run %s is sound: %d envelope(s), every body matches its hash, every "
-        "dispatched task answered" % (args.run_id, count)
-    )
+    print("legacy run %s has %d envelope(s); this is not governed evidence" % (args.run_id, count))
     return 0
 
 
@@ -339,7 +436,9 @@ def main(argv=None):
     parser.add_argument("--workspace", default=".")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    post_p = sub.add_parser("post")
+    post_p = sub.add_parser(
+        "post", help="governed capture; unsupported without authenticated service"
+    )
     post_p.add_argument("--run-id", required=True)
     post_p.add_argument(
         "--kind", required=True, choices=["task", "report", "failure", "question", "answer"]
@@ -351,17 +450,19 @@ def main(argv=None):
     post_p.add_argument("--failure-mode")
     post_p.set_defaults(func=cmd_post)
 
-    seal = sub.add_parser("seal-failure")
+    seal = sub.add_parser(
+        "seal-failure", help="governed capture; unsupported without authenticated service"
+    )
     seal.add_argument("--run-id", required=True)
     seal.add_argument("--from", required=True)
     seal.add_argument("--failure-mode", required=True)
     seal.set_defaults(func=cmd_seal_failure)
 
-    list_p = sub.add_parser("list")
+    list_p = sub.add_parser("legacy-list", help="read historic file mailbox records")
     list_p.add_argument("--run-id", required=True)
     list_p.set_defaults(func=cmd_list)
 
-    verify_p = sub.add_parser("verify")
+    verify_p = sub.add_parser("legacy-verify", help="verify historic file mailbox records")
     verify_p.add_argument("--run-id", required=True)
     verify_p.set_defaults(func=cmd_verify)
 

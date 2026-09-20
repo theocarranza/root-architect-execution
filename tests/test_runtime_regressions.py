@@ -115,10 +115,10 @@ class RuntimeRegressionTests(unittest.TestCase):
         directory = mailbox.mailbox_dir(self.workspace, self.RUN)
         directory.mkdir(parents=True)
         (directory / "fake.md").write_text("not an envelope", encoding="utf-8")
-        self.assertTrue(job_queue.verify(self.workspace, self.RUN))
+        self.assertTrue(mailbox.legacy_verify(self.workspace, self.RUN))
 
     def test_report_for_one_task_cannot_complete_another_task(self):
-        mailbox.post(
+        mailbox.legacy_post(
             self.workspace,
             self.RUN,
             "task",
@@ -126,8 +126,12 @@ class RuntimeRegressionTests(unittest.TestCase):
             "worker:implementer",
             "orchestrator",
             b"first task",
+            envelope_id="task-first",
+            task_id="first",
+            attempt_id="first-attempt",
+            selected_template="impl-executor-cheap",
         )
-        report = mailbox.post(
+        report = mailbox.legacy_post(
             self.workspace,
             self.RUN,
             "report",
@@ -135,8 +139,13 @@ class RuntimeRegressionTests(unittest.TestCase):
             "orchestrator",
             "orchestrator",
             b"first result",
+            envelope_id="report-first",
+            task_id="first",
+            attempt_id="first-attempt",
+            reply_to="task-first",
+            selected_template="impl-executor-cheap",
         )
-        mailbox.post(
+        mailbox.legacy_post(
             self.workspace,
             self.RUN,
             "task",
@@ -144,6 +153,10 @@ class RuntimeRegressionTests(unittest.TestCase):
             "worker:implementer",
             "orchestrator",
             b"second task",
+            envelope_id="task-second",
+            task_id="second",
+            attempt_id="second-attempt",
+            selected_template="impl-executor-cheap",
         )
         self.seed_legacy_queue(
             [
@@ -157,8 +170,7 @@ class RuntimeRegressionTests(unittest.TestCase):
                 for task in ("first", "second")
             ]
         )
-        self.assertTrue(mailbox.verify(self.workspace, self.RUN))
-        self.assertTrue(job_queue.verify(self.workspace, self.RUN))
+        self.assertTrue(mailbox.legacy_verify(self.workspace, self.RUN))
 
     def test_worker_cannot_route_a_report_directly_to_root(self):
         with self.assertRaises(mailbox.MailboxError):
