@@ -148,10 +148,10 @@ Tasks 3 and 4 can progress independently. After the common runtime stabilizes, C
 **Files:** create `AI_Codex/Architecture/ADR/0004-runtime-evidence-and-admission.md`; update `docs/00-product/requirements.md` and `docs/05-security/threat-model.md`; add regression cases to `tests/test_runtime_regressions.py`.
 
 - [ ] Record the starting commit, dirty-file hashes, current host versions, active legacy runs, and generated-bundle differences. Preserve the existing Gemini/Claude/shared changes and assign ownership before editing them.
-- [ ] Convert R1–R3 reproductions into tests: empty tools passing preflight, forged preflight identity/type, dispatch without admission, two active queue tasks, fake envelope, old report reused, and direct worker-to-root routing.
+- [x] Convert R1–R3 reproductions into tests: empty tools passing preflight, forged preflight identity/type, dispatch without admission, two active queue tasks, fake envelope, old report reused, and direct worker-to-root routing.
 - [ ] Record the inherited baseline accurately: the review ran 263 tests with two Gemini bundle failures; rerun at implementation start rather than treating that count as permanent.
-- [ ] Write the architecture decision adopting the design above and superseding only the incorrect parts of decision 0003. Preserve historical evidence and its dates.
-- [ ] Distinguish compulsory execution controls from disclosed policy limitations. Required worker tool/delegation denial and protected evidence storage must block runtime acceptance if absent. Root's ordinary chat outside the governed launcher remains outside the enforcement claim.
+- [x] Write the architecture decision adopting the design above and superseding only the incorrect parts of decision 0003. Preserve historical evidence and its dates.
+- [x] Distinguish compulsory execution controls from disclosed policy limitations. Required worker tool/delegation denial and protected evidence storage must block runtime acceptance if absent. Root's ordinary chat outside the governed launcher remains outside the enforcement claim.
 
 **Validation:** `python3 -m unittest tests.test_runtime_regressions -v`. The new tests must demonstrate the current failures before repairs. Existing historical examples remain readable.
 
@@ -159,8 +159,8 @@ Tasks 3 and 4 can progress independently. After the common runtime stabilizes, C
 
 **Files:** modify `schemas/host-capability.schema.json`, `schemas/agent-interface.schema.json`, `scripts/validate_interfaces.py`, and `scripts/render_agents.py`; create `scripts/host_runtime.py`, `tests/test_runtime_capabilities.py`, and `tests/test_host_runtime_contract.py`.
 
-- [ ] Introduce the capability shape above, explicit product/surface/version/channel identity, and evidence references. Provide a conservative conversion from existing booleans; unsupported inference becomes `unknown`.
-- [ ] Define a host bridge with these operations and schema-validated JSON results. A missing operation returns `unsupported_host_capability` with the specific capability, not an empty successful result.
+- [x] Introduce the capability shape above, explicit product/surface/version/channel identity, and evidence references. Provide a conservative conversion from existing booleans; unsupported inference becomes `unknown`.
+- [x] Define a host bridge with these operations and schema-validated JSON results. A missing operation returns `unsupported_host_capability` with the specific capability, not an empty successful result.
 
 ```python
 probe(launch_context: dict) -> dict
@@ -172,10 +172,10 @@ cancel(provider_thread_id: str) -> dict
 events(cursor: str | None) -> dict
 ```
 
-- [ ] Define event results as an ordered `events` list plus `next_cursor`; each event identifies its source and child, including explicit unknowns. Do not invent provider event IDs where the host supplies none; record the adapter's deduplication key separately.
-- [ ] Update validators to check enforcement semantics and execution surface, not only matching `supported` booleans. A sample containing `readonly: true` cannot prove mutation denial.
+- [x] Define event results as an ordered `events` list plus `next_cursor`; each event identifies its source and child, including explicit unknowns. Do not invent provider event IDs where the host supplies none; record the adapter's deduplication key separately.
+- [x] Update validators to check enforcement semantics and execution surface, not only matching `supported` booleans. A sample containing `readonly: true` cannot prove mutation denial.
 - [ ] Move host-specific probing and payload parsing out of `root_preflight.py` into the corresponding adapter. Reject the current practice of fabricating an observed tool roster from the presence of local files.
-- [ ] Add fixture cases for documentation-only support, live support, contradictory evidence, unknown nesting, model/effort alias collapse, and plugin-versus-session behavior.
+- [x] Add fixture cases for documentation-only support, live support, contradictory evidence, unknown nesting, model/effort alias collapse, and plugin-versus-session behavior.
 
 **Validation:** `python3 -m unittest tests.test_runtime_capabilities tests.test_host_runtime_contract -v`; `python3 scripts/validate_interfaces.py`. These checks validate claims without pretending to run any host.
 
@@ -198,13 +198,13 @@ events(cursor: str | None) -> dict
 
 **Files:** create `schemas/runtime-run.schema.json`, `schemas/runtime-preflight.schema.json`, `schemas/runtime-attempt.schema.json`, `schemas/runtime-event.schema.json`, `schemas/runtime-envelope.schema.json`, `scripts/runtime_contract.py`, and `tests/test_runtime_contracts.py`; update `schemas/brief.schema.json` and `schemas/orchestrator-outcome.schema.json` for version 2 references.
 
-- [ ] Define version 2 records with strict types and rejected unknown fields. Separate run/task/attempt/provider identifiers, workspace/configuration fingerprints, principal identity, and the state transitions above.
-- [ ] Define `started_at`, `last_activity_at`, `deadline_at`, `last_envelope_id`, observed activity state, and controller lease expiry explicitly. Distinguish provider-observed progress from local bookkeeping updates and retain separate version 1 readers for historical data.
-- [ ] Define an envelope header containing `envelope_id`, `run_id`, `task_id`, `attempt_id`, `kind`, `from`, `to`, `captured_by`, `capture_source`, `reply_to`, `body_sha256`, `created_at`, and provider correlation fields. Nullable task/attempt values are allowed only for run-level messages.
-- [ ] Keep business authorship separate from physical capture: worker authors a report, the controller captures it for the orchestrator. Neither a worker nor the orchestrator may forge controller origin.
-- [ ] Define valid routes: root→orchestrator task/answer; orchestrator→root question/outcome; orchestrator→worker task/answer; worker→orchestrator report/question; controller-origin failure/lifecycle records addressed to the responsible parent. Reject other pairs.
-- [ ] Make blocked outcomes require a reason and referenced question/failure evidence. Make accepted outcomes reference validated attempts and orchestrator decisions, rather than trusting counts or filenames.
-- [ ] Add schema tests for null/list/scalar input, missing correlation, mismatched attempts, invented templates, wrong routes, and strings in boolean fields.
+- [x] Define version 2 records with strict types and rejected unknown fields. Separate run/task/attempt/provider identifiers, workspace/configuration fingerprints, principal identity, and the state transitions above.
+- [x] Define `started_at`, `last_activity_at`, `deadline_at`, `last_envelope_id`, observed activity state, and controller lease expiry explicitly. Distinguish provider-observed progress from local bookkeeping updates and retain separate version 1 readers for historical data.
+- [x] Define an envelope header containing `envelope_id`, `run_id`, `task_id`, `attempt_id`, `kind`, `from`, `to`, `captured_by`, `capture_source`, `reply_to`, `body_sha256`, `created_at`, and provider correlation fields. Nullable task/attempt values are allowed only for run-level messages.
+- [x] Keep business authorship separate from physical capture: worker authors a report, the controller captures it for the orchestrator. Neither a worker nor the orchestrator may forge controller origin.
+- [x] Define valid routes: root→orchestrator task/answer; orchestrator→root question/outcome; orchestrator→worker task/answer; worker→orchestrator report/question; controller-origin failure/lifecycle records addressed to the responsible parent. Reject other pairs.
+- [x] Make blocked outcomes require a reason and referenced question/failure evidence. Make accepted outcomes reference validated attempts and orchestrator decisions, rather than trusting counts or filenames.
+- [x] Add schema tests for null/list/scalar input, missing correlation, mismatched attempts, invented templates, wrong routes, and strings in boolean fields.
 
 **Validation:** `python3 -m unittest tests.test_runtime_contracts -v`. Example invariant: an envelope for attempt `a1` cannot validate as the answer to `a2`, even when both use the same worker role.
 
