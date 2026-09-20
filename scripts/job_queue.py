@@ -42,7 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mailbox  # noqa: E402
-import root_preflight  # noqa: E402
+import runtime_policy  # noqa: E402
 from jsonschema_mini import SchemaError, Validator  # noqa: E402
 
 SCHEMAS = Path(__file__).resolve().parent.parent / "schemas"
@@ -112,36 +112,12 @@ def validate(document):
             )
 
 
-def save(workspace, run_id, document):
-    validate(document)
-    path = queue_path(workspace, run_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-    return path
+def save(workspace, run_id, document, admission):
+    _unsupported_mutation(admission, "save queue")
 
 
-def init(workspace, run_id, tasks):
-    checked, why = root_preflight.passed(workspace, run_id)
-    if not checked:
-        raise JobQueueError(
-            "refusing to queue run %s: %s\n\nThe queue is where a run begins, "
-            "so it is where the startup check has to bite. Orchestrating "
-            "without it would record an isolation nothing was holding." % (run_id, why)
-        )
-
-    path = queue_path(workspace, run_id)
-    if path.exists():
-        raise JobQueueError(
-            "%s already exists. A run's queue is created once: re-initialising "
-            "would discard whatever the earlier one recorded." % path
-        )
-    document = {
-        "schema_version": 1,
-        "run_id": run_id,
-        "created_at": _now(),
-        "tasks": [dict(task, state="pending") for task in tasks],
-    }
-    return save(workspace, run_id, document)
+def init(workspace, run_id, tasks, admission=None):
+    _unsupported_mutation(admission, "initialize queue")
 
 
 def find(document, name):
@@ -171,33 +147,15 @@ def next_task(document):
     return None
 
 
-def mark(workspace, run_id, name, state, envelope=None):
-    document = load(workspace, run_id)
-    task = find(document, name)
-    current = task["state"]
+def mark(workspace, run_id, name, state, envelope=None, admission=None):
+    _unsupported_mutation(admission, "mutate queue")
 
-    if state not in ALLOWED:
-        raise JobQueueError("unknown state %r" % state)
-    if state not in ALLOWED[current]:
-        raise JobQueueError(
-            "task %r cannot go from %s to %s. Transitions are monotonic - a "
-            "queue that can move a task backwards can revise its own history."
-            % (name, current, state)
-        )
-    if state in TERMINAL and not envelope:
-        # validate() refuses this too, on save, so nothing inconsistent can be
-        # written either way. This check exists for the message: the caller is
-        # mid-operation and wants to know what to supply, not which invariant
-        # the finished document breaks. Both are kept deliberately; the test
-        # asserts THIS wording so the distinction stays load-bearing.
-        raise JobQueueError("marking %r as %s needs the envelope that answered it" % (name, state))
 
-    task["state"] = state
-    task["updated_at"] = _now()
-    if envelope:
-        task["envelope"] = envelope
-    save(workspace, run_id, document)
-    return task
+def _unsupported_mutation(admission, action):
+    try:
+        runtime_policy.unsupported_direct_mutation(admission)
+    except runtime_policy.AdmissionError as exc:
+        raise JobQueueError("cannot %s: %s" % (action, exc))
 
 
 def verify(workspace, run_id):
@@ -245,6 +203,28 @@ def _fail(message):
     return 1
 
 
+def _add_admission_arguments(parser):
+    parser.add_argument("--host", required=True)
+    parser.add_argument("--workspace-fingerprint", required=True)
+    parser.add_argument("--controller-session-id", required=True)
+    parser.add_argument("--catalog-digest", required=True)
+    parser.add_argument("--configuration-digest", required=True)
+    parser.add_argument("--capability-evidence", required=True)
+
+
+def _admission_from_args(args):
+    try:
+        evidence = json.loads(Path(args.capability_evidence).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise JobQueueError("cannot read selected transport capability evidence: %s" % exc)
+    return {
+        "run_id": args.run_id, "host_id": args.host, "workspace": str(Path(args.workspace).resolve()),
+        "workspace_fingerprint": args.workspace_fingerprint,
+        "controller_session_id": args.controller_session_id, "catalog_digest": args.catalog_digest,
+        "configuration_fingerprint": args.configuration_digest, "capability_evidence": evidence,
+    }
+
+
 def cmd_init(args):
     try:
         tasks = json.loads(Path(args.tasks_file).read_text(encoding="utf-8"))
@@ -253,7 +233,7 @@ def cmd_init(args):
     if not isinstance(tasks, list):
         return _fail("%s must hold a list of tasks" % args.tasks_file)
     try:
-        path = init(args.workspace, args.run_id, tasks)
+        path = init(args.workspace, args.run_id, tasks, _admission_from_args(args))
     except JobQueueError as exc:
         return _fail(str(exc))
     print("queued %d task(s) in %s" % (len(tasks), path))
@@ -274,7 +254,7 @@ def cmd_next(args):
 
 def cmd_mark(args):
     try:
-        task = mark(args.workspace, args.run_id, args.task, args.state, args.envelope)
+        task = mark(args.workspace, args.run_id, args.task, args.state, args.envelope, _admission_from_args(args))
     except JobQueueError as exc:
         return _fail(str(exc))
     print("%s -> %s" % (task["name"], task["state"]))
@@ -313,6 +293,7 @@ def main(argv=None):
     init_p = sub.add_parser("init")
     init_p.add_argument("--run-id", required=True)
     init_p.add_argument("--tasks-file", required=True)
+    _add_admission_arguments(init_p)
     init_p.set_defaults(func=cmd_init)
 
     next_p = sub.add_parser("next")
@@ -324,6 +305,7 @@ def main(argv=None):
     mark_p.add_argument("--task", required=True)
     mark_p.add_argument("--state", required=True, choices=["dispatched", "returned", "failed"])
     mark_p.add_argument("--envelope")
+    _add_admission_arguments(mark_p)
     mark_p.set_defaults(func=cmd_mark)
 
     status_p = sub.add_parser("status")

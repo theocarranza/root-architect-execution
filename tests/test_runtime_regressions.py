@@ -39,17 +39,12 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.workspace = Path(tempfile.mkdtemp(prefix="runtime-regressions-"))
         self.addCleanup(shutil.rmtree, self.workspace, ignore_errors=True)
 
-    def write_passing_preflight(self):
-        path = root_preflight.record_path(self.workspace, self.RUN)
+    def seed_legacy_queue(self, tasks):
+        """Create old queue bytes only to preserve later mailbox regressions."""
+        path = job_queue.queue_path(self.workspace, self.RUN)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"passed": True}), encoding="utf-8")
-
-    def init_queue(self, names):
-        self.write_passing_preflight()
-        return job_queue.init(self.workspace, self.RUN, [
-            {"name": name, "worker": "worker:implementer", "brief": "brief.json"}
-            for name in names
-        ])
+        path.write_text(json.dumps({"schema_version": 1, "run_id": self.RUN,
+            "created_at": "2026-09-20T00:00:00Z", "tasks": tasks}), encoding="utf-8")
 
     def test_empty_codex_tools_cannot_pass_preflight(self):
         observed = self.workspace / "observed.json"
@@ -74,28 +69,26 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_second_active_queue_task_is_refused_at_transition(self):
-        self.init_queue(["first", "second"])
-        job_queue.mark(self.workspace, self.RUN, "first", "dispatched")
         with self.assertRaises(job_queue.JobQueueError):
             job_queue.mark(self.workspace, self.RUN, "second", "dispatched")
 
     def test_fake_envelope_cannot_complete_a_queue_task(self):
-        self.init_queue(["first"])
-        job_queue.mark(self.workspace, self.RUN, "first", "dispatched")
+        self.seed_legacy_queue([{"name": "first", "worker": "worker:implementer", "brief": "brief.json",
+            "state": "returned", "envelope": "fake.md"}])
         directory = mailbox.mailbox_dir(self.workspace, self.RUN)
         directory.mkdir(parents=True)
         (directory / "fake.md").write_text("not an envelope", encoding="utf-8")
-        job_queue.mark(self.workspace, self.RUN, "first", "returned", "fake.md")
         self.assertTrue(job_queue.verify(self.workspace, self.RUN))
 
     def test_report_for_one_task_cannot_complete_another_task(self):
-        self.init_queue(["first", "second"])
         mailbox.post(self.workspace, self.RUN, "task", "orchestrator", "worker:implementer", "orchestrator", b"first task")
         report = mailbox.post(self.workspace, self.RUN, "report", "worker:implementer", "orchestrator", "orchestrator", b"first result")
         mailbox.post(self.workspace, self.RUN, "task", "orchestrator", "worker:implementer", "orchestrator", b"second task")
-        for task in ("first", "second"):
-            job_queue.mark(self.workspace, self.RUN, task, "dispatched")
-            job_queue.mark(self.workspace, self.RUN, task, "returned", report.name)
+        self.seed_legacy_queue([
+            {"name": task, "worker": "worker:implementer", "brief": "brief.json",
+             "state": "returned", "envelope": report.name}
+            for task in ("first", "second")
+        ])
         self.assertTrue(mailbox.verify(self.workspace, self.RUN))
         self.assertTrue(job_queue.verify(self.workspace, self.RUN))
 

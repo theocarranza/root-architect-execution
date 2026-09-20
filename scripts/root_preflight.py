@@ -46,6 +46,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import render_agents  # noqa: E402
+import runtime_policy  # noqa: E402
 
 PREFLIGHT_SUBDIR = Path(".root-architect") / "preflight"
 
@@ -75,7 +76,7 @@ def root_role():
     )
 
 
-def expectations(host_name="claude-code"):
+def expectations(host_name):
     """What root's own manifest and the host manifest say root should see.
 
     Derived, never declared beside the check. A second copy of the expected
@@ -130,7 +131,7 @@ def read_observation(path):
     return {"tools": document["tools"], "agent_types": document["agent_types"]}
 
 
-def judge(observed, expected, host_name="claude-code", workspace="."):
+def judge(observed, expected, host_name, workspace):
     """The verdict. Returns a list of refusals; empty means the boundary holds."""
     refusals = []
 
@@ -146,6 +147,12 @@ def judge(observed, expected, host_name="claude-code", workspace="."):
         refusals.extend(observed["_guard_errors"])
 
     missing = [t for t in expected["delegate_tools"] if t not in observed["tools"]]
+    if not expected["delegate_tools"]:
+        refusals.append(
+            "the selected host declares no required delegation capability. "
+            "An empty tool map cannot admit a run; capture selected-transport "
+            "capability evidence that proves delegation is available."
+        )
     if missing:
         refusals.append(
             "the dispatch tool is missing from your toolset (%s). Either the "
@@ -171,14 +178,6 @@ def judge(observed, expected, host_name="claude-code", workspace="."):
             "The agent is not installed under that name, or the type list does "
             "not match how this host names a plugin's agents." % ", ".join(sorted(want - got))
         )
-
-    # Hardware/Hook verification on Gemini
-    if host_name == "gemini":
-        hook_errors = verify_gemini_runtime_guards(workspace)
-        if hook_errors:
-            for err in hook_errors:
-                if err not in refusals:
-                    refusals.append(err)
 
     return refusals
 
@@ -284,28 +283,25 @@ def verify_gemini_runtime_guards(workspace):
 
 
 def interrogate_runtime(workspace, host_name="gemini"):
-    """Autonomously interrogate the active runtime capabilities rather than relying on Root self-reporting."""
-    if host_name == "gemini":
-        guard_errors = verify_gemini_runtime_guards(workspace)
-        if guard_errors:
-            return {
-                "tools": ["invoke_subagent", "define_subagent", "send_message", "manage_subagents"],
-                "agent_types": [
-                    "orchestrator",
-                    "impl-executor",
-                    "spec-validator",
-                    "quality-validator",
-                ],
-                "_guard_errors": guard_errors,
-            }
-        return {
-            "tools": ["invoke_subagent", "send_message", "manage_subagents"],
-            "agent_types": ["orchestrator"],
-        }
-    raise PreflightError("interrogate_runtime is not supported for host %r" % host_name)
+    """Reject guessed runtime state; files are not host registration evidence."""
+    raise PreflightError(
+        "auto-interrogation is unsupported for %s: hook and agent files do not prove that "
+        "the selected transport registered or enforces them. Supply selected-transport capability evidence."
+        % host_name
+    )
 
 
-def run(workspace, run_id, observed_path=None, host_name="claude-code", auto=False):
+def record_admission(workspace, context):
+    """Compatibility scripts cannot authenticate their caller or write admission."""
+    try:
+        runtime_policy.unsupported_direct_mutation(context)
+    except runtime_policy.AdmissionError as exc:
+        raise PreflightError(str(exc))
+
+
+def run(workspace, run_id, observed_path=None, host_name=None, auto=False, admission=None):
+    if not isinstance(host_name, str) or not host_name:
+        raise PreflightError("an explicit host is required; no default host can authorize mutation")
     expected = expectations(host_name)
     if auto or (observed_path is None and host_name == "gemini"):
         observed = interrogate_runtime(workspace, host_name)
@@ -317,37 +313,38 @@ def run(workspace, run_id, observed_path=None, host_name="claude-code", auto=Fal
         observed = read_observation(observed_path)
     refusals = judge(observed, expected, host_name=host_name, workspace=workspace)
 
-    record = {
-        "run_id": run_id,
-        "host": host_name,
-        "checked_at": _now(),
-        "passed": not refusals,
-        "observed": observed,
-        "expected": expected,
-        "refusals": refusals,
-    }
-    path = record_path(workspace, run_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # The failing record is written too, on purpose. A run that was refused and
-    # a run where nobody checked must not look the same afterwards.
-    path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-
     if refusals:
         raise PreflightError(
-            "this session is not isolated:\n  - %s\n\nRecorded at %s. Do not "
-            "orchestrate. Start the session as the root agent "
-            "(`claude --agent root-architect`) and check again." % ("\n  - ".join(refusals), path)
+            "this session is not admitted:\n  - %s\n\nDo not orchestrate. "
+            "Capture selected-transport evidence and rerun preflight for %s."
+            % ("\n  - ".join(refusals), host_name)
         )
-    return record
+    if not isinstance(admission, dict):
+        raise PreflightError(
+            "preflight observation is supplemental; explicit admission identity and selected "
+            "transport capability evidence are required before a record can authorize mutation"
+        )
+    if admission.get("run_id") != run_id or admission.get("host_id") != host_name:
+        raise PreflightError("admission identity does not match the explicit run and host")
+    try:
+        record_admission(workspace, admission)
+    except runtime_policy.AdmissionError as exc:
+        raise PreflightError(str(exc))
 
 
-def passed(workspace, run_id):
+def passed(workspace, context_or_run_id):
     """Whether a passing check is on record for this run.
 
     Read by job_queue.init, which is what makes D11 a gate rather than an
     instruction: a run whose queue cannot be created has not quietly started
     without its check.
     """
+    if isinstance(context_or_run_id, dict):
+        try:
+            runtime_policy.unsupported_direct_mutation(context_or_run_id)
+        except runtime_policy.AdmissionError as exc:
+            return False, str(exc)
+    run_id = context_or_run_id
     path = record_path(workspace, run_id)
     if not path.is_file():
         return False, (
@@ -359,7 +356,7 @@ def passed(workspace, run_id):
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return False, "%s will not parse (%s), so it proves nothing" % (path, exc)
-    if not record.get("passed"):
+    if record.get("passed") is not True:
         return False, (
             "the startup check for run %s is on record as FAILED: "
             "%s" % (run_id, "; ".join(record.get("refusals") or ["no reason recorded"]))
@@ -369,7 +366,14 @@ def passed(workspace, run_id):
 
 def cmd_check(args):
     try:
-        record = run(args.workspace, args.run_id, args.observed, args.host, auto=args.auto)
+        evidence = json.loads(Path(args.capability_evidence).read_text(encoding="utf-8"))
+        admission = {
+            "run_id": args.run_id, "host_id": args.host, "workspace": str(Path(args.workspace).resolve()),
+            "workspace_fingerprint": args.workspace_fingerprint,
+            "controller_session_id": args.controller_session_id, "catalog_digest": args.catalog_digest,
+            "configuration_fingerprint": args.configuration_digest, "capability_evidence": evidence,
+        }
+        record = run(args.workspace, args.run_id, args.observed, args.host, auto=args.auto, admission=admission)
     except PreflightError as exc:
         print("  %s" % exc, file=sys.stderr)
         return 1
@@ -395,9 +399,14 @@ def cmd_status(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workspace", default=".")
+    parser.add_argument("--workspace", required=True)
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--host", default="claude-code")
+    parser.add_argument("--host", required=True)
+    parser.add_argument("--controller-session-id")
+    parser.add_argument("--catalog-digest")
+    parser.add_argument("--configuration-digest")
+    parser.add_argument("--workspace-fingerprint")
+    parser.add_argument("--capability-evidence")
     parser.add_argument(
         "--observed",
         help='JSON file holding what root can see: {"tools": [...], "agent_types": [...]}',
@@ -415,6 +424,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.status:
         return cmd_status(args)
+    missing = [name for name in ("controller_session_id", "catalog_digest", "configuration_digest", "workspace_fingerprint", "capability_evidence") if not getattr(args, name)]
+    if missing:
+        print("  explicit admission inputs required: %s" % ", ".join("--" + name.replace("_", "-") for name in missing), file=sys.stderr)
+        return 2
     if not args.observed and not args.auto:
         print(
             "  --observed is required: this script judges an observation, it "
