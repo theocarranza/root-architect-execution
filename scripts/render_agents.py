@@ -34,6 +34,27 @@ SCHEMAS = ROOT / "schemas"
 EXTRA_FIELDS = {"quality-validator": {"failure_scenario"}}
 
 
+def normalize_capability(capability):
+    """Return the portable, fail-closed view of a capability claim.
+
+    Old manifests predate the distinction between something being available and
+    the host enforcing it.  They remain readable, but a negative boolean was
+    often merely "not found".  Therefore only a positive boolean becomes a
+    positive availability; every legacy negative becomes unknown.
+    """
+    if "availability" in capability:
+        return dict(capability)
+    supported = capability.get("supported")
+    return {
+        "availability": "supported" if supported is True else "unknown",
+        "enforcement": "unknown",
+        "scope": "unknown",
+        "execution_surface": "unknown",
+        "evidence": ([{"kind": "legacy", "reference": capability["verified"]}]
+                     if capability.get("verified") else []),
+    }
+
+
 def return_skeleton(role):
     return skeleton(
         SCHEMAS / role["returns"],
