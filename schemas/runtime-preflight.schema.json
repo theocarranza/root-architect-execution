@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://root-architect-execution/schemas/runtime-preflight.schema.json",
+  "title": "Runtime preflight version 2",
+  "type": "object",
+  "required": ["schema_version", "preflight_id", "run_id", "host_id", "workspace_fingerprint", "configuration_fingerprint", "principal_id", "controller_session_id", "passed", "checked_at"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 2 },
+    "preflight_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "host_id": { "type": "string", "minLength": 1 },
+    "workspace_fingerprint": { "type": "string", "minLength": 1 },
+    "configuration_fingerprint": { "type": "string", "minLength": 1 },
+    "principal_id": { "type": "string", "minLength": 1 },
+    "controller_session_id": { "type": "string", "minLength": 1 },
+    "passed": { "type": "boolean" },
+    "checked_at": { "type": "string", "minLength": 1 }
+  }
+}
