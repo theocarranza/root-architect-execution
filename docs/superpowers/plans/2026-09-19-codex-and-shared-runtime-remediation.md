@@ -212,13 +212,13 @@ events(cursor: str | None) -> dict
 
 **Files:** create `scripts/runtime_store.py`, `scripts/runtime_service.py`, `scripts/runtime.py`, `tests/test_runtime_store.py`, and `tests/test_runtime_service.py`.
 
-- [ ] Implement tables for runs, preflights, tasks, attempts, envelopes, events, decisions, and workspace reservations. Store raw message bytes as immutable binary data; record hashes and source metadata in the same transaction.
-- [ ] Enable foreign keys; use `BEGIN IMMEDIATE` for state-changing operations, a bounded lock timeout, uniqueness constraints, and a schema version. Reject filesystem state roots that fail the supported local-storage check.
-- [ ] Enforce unique provider-result/deduplication keys. Repeating an identical event returns the original record; repeating its identity with different content blocks the run and preserves the conflict.
-- [ ] Implement append-only event/envelope tables, explicit correction records, and generated JSON/Markdown exports. Never read exports as authoritative state.
+- [x] Implement tables for runs, preflights, tasks, attempts, envelopes, events, decisions, and workspace reservations. Store raw message bytes as immutable binary data; record hashes and source metadata in the same transaction.
+- [x] Enable foreign keys; use `BEGIN IMMEDIATE` for state-changing operations, a bounded lock timeout, uniqueness constraints, and a schema version. Reject filesystem state roots that fail the supported local-storage check.
+- [x] Enforce unique provider-result/deduplication keys. Repeating an identical event returns the original record; repeating its identity with different content blocks the run and preserves the conflict.
+- [x] Implement append-only event/envelope tables, explicit correction records, and generated JSON/Markdown exports. Never read exports as authoritative state.
 - [ ] Implement service authentication from the proven host/controller identity path. Do not accept `--role`, `persisted_by`, environment variables, or a caller-provided session ID as authentication. Keep privileged credentials out of worker prompts, environment, readable files, and inherited connections.
 - [ ] Prove worker denial for database writes, control-socket access, and credential access. Where the host cannot enforce this, return an unsupported boundary rather than relying on file mode bits.
-- [ ] Add process-level tests: simultaneous writers, forced exit before/after commit, disk-full/write failure, duplicate event delivery, partial export, restart, and conflicting result identity.
+- [x] Add process-level tests: simultaneous writers, forced exit before/after commit, disk-full/write failure, duplicate event delivery, partial export, restart, and conflicting result identity.
 
 **Validation:** `python3 -m unittest tests.test_runtime_store tests.test_runtime_service -v`.
 
