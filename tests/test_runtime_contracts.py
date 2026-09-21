@@ -7,6 +7,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import runtime_contract
+import render_agents
+
+
+def selected_identity(template_id="impl-executor-cheap"):
+    catalog = render_agents.select_catalog("codex")
+    selected = render_agents.select_template(catalog, template_id)
+    return {
+        "family": selected["family"],
+        "selected_template": selected["template_id"],
+        "template_catalog_sha256": catalog["catalog_sha256"],
+        "requested_model_tier": selected["requested"]["model_tier"],
+        "requested_effort": selected["requested"]["effort"],
+        "resolved_model": selected["resolved"]["model"],
+        "resolved_effort": selected["resolved"]["effort"],
+        "effective_model": None,
+        "effective_effort": None,
+    }
 
 
 def envelope(**changes):
@@ -17,11 +34,12 @@ def envelope(**changes):
         "task_id": "task-1",
         "attempt_id": "attempt-1",
         "kind": "report",
-        "from": "worker:implementer",
+        "from": "worker:impl-executor-cheap",
         "to": "orchestrator",
         "captured_by": "controller:local-1",
         "capture_source": "controller",
         "reply_to": "env-task-1",
+        **selected_identity(),
         "body_sha256": "a" * 64,
         "created_at": "2026-09-20T00:00:00Z",
         "provider_thread_id": "thread-1",
@@ -29,6 +47,9 @@ def envelope(**changes):
         "provider_event_id": "event-1",
     }
     record.update(changes)
+    if not (record["from"].startswith("worker:") or record["to"].startswith("worker:")):
+        for field in runtime_contract._TEMPLATE_IDENTITY_FIELDS:
+            record[field] = None
     return record
 
 
@@ -41,7 +62,7 @@ def attempt(**changes):
         "provider_thread_id": "thread-1",
         "provider_turn_id": "turn-1",
         "provider_event_id": "event-1",
-        "selected_template": "impl-executor-cheap",
+        **selected_identity(),
         "started_at": "2026-09-20T00:00:00Z",
         "last_activity_at": "2026-09-20T00:01:00Z",
         "deadline_at": "2026-09-20T01:00:00Z",
@@ -65,6 +86,82 @@ class RuntimeContractTests(unittest.TestCase):
             for value in (None, [], "record"):
                 self.assert_invalid(runtime_contract.validate_record(name, value))
         self.assert_invalid(runtime_contract.validate_record("attempt", attempt(extra=True)))
+
+    def test_v2_attempt_requires_explicit_catalog_identity_and_unknown_effective_values(self):
+        missing_identity = attempt()
+        missing_identity.pop("template_catalog_sha256")
+        self.assert_invalid(runtime_contract.validate_record("attempt", missing_identity))
+        catalog = render_agents.select_catalog("codex")
+        selected = render_agents.select_template(catalog, "impl-executor-cheap")
+        record = attempt(
+            family=selected["family"],
+            template_catalog_sha256=catalog["catalog_sha256"],
+            requested_model_tier=selected["requested"]["model_tier"],
+            requested_effort=selected["requested"]["effort"],
+            resolved_model=selected["resolved"]["model"],
+            resolved_effort=selected["resolved"]["effort"],
+            effective_model=None,
+            effective_effort=None,
+        )
+        self.assertEqual([], runtime_contract.validate_attempt(record, catalog))
+        self.assert_invalid(
+            runtime_contract.validate_attempt(
+                dict(record, template_catalog_sha256="b" * 64), catalog
+            )
+        )
+
+    def test_v2_brief_admission_binds_selected_template_to_catalog(self):
+        catalog = render_agents.select_catalog("codex")
+        selected = render_agents.select_template(catalog, "impl-executor-cheap")
+        brief = {
+            "schema_version": 2,
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "family": selected["family"],
+            "role": selected["family"],
+            "selected_template": selected["template_id"],
+            "template_catalog_sha256": catalog["catalog_sha256"],
+            "requested_model_tier": selected["requested"]["model_tier"],
+            "requested_effort": selected["requested"]["effort"],
+            "resolved_model": selected["resolved"]["model"],
+            "resolved_effort": selected["resolved"]["effort"],
+            "effective_model": None,
+            "effective_effort": None,
+            "task": "Implement",
+            "attempt": 1,
+            "max_attempts": 3,
+            "model": selected["resolved"]["model"],
+            "effort": "low",
+            "read_paths": [],
+            "write_paths": [],
+            "acceptance": [{"command": "true", "expect": "pass"}],
+            "constraints": ["Stay in scope"],
+            "owner_owned_paths": [],
+            "expected_result": "Change",
+        }
+        self.assertEqual([], runtime_contract.validate_brief(brief, catalog))
+        incomplete = dict(brief)
+        incomplete.pop("template_catalog_sha256")
+        self.assert_invalid(runtime_contract.validate_brief(incomplete, catalog))
+        undeclared = dict(brief, selected_template="dynamic-worker")
+        self.assert_invalid(runtime_contract.validate_brief(undeclared, catalog))
+
+    def test_worker_capture_and_outcome_require_selection_provenance(self):
+        incomplete = envelope()
+        incomplete.pop("template_catalog_sha256")
+        self.assert_invalid(runtime_contract.validate_envelope(incomplete, "controller:local-1"))
+        self.assert_invalid(
+            runtime_contract.validate_record(
+                "outcome",
+                {
+                    "schema_version": 2,
+                    "run_id": "run-1",
+                    "outcome": "rejected",
+                    "rationale": "failed",
+                },
+            )
+        )
 
     def test_preflight_requires_literal_boolean(self):
         record = runtime_contract.valid_preflight(
@@ -94,7 +191,7 @@ class RuntimeContractTests(unittest.TestCase):
             "task_id": "task-1",
             "attempt_id": "attempt-1",
             "dispatched_envelope_id": "env-task-1",
-            "selected_template": "impl-executor-cheap",
+            **selected_identity(),
         }
         self.assertEqual(
             [],
@@ -202,6 +299,7 @@ class RuntimeContractTests(unittest.TestCase):
             "run_id": "run-1",
             "outcome": "accepted",
             "rationale": "validated",
+            "template_selections": [{"attempt_id": "attempt-1", **selected_identity()}],
             "validated_attempt_refs": ["attempt-1"],
             "orchestrator_decision_refs": ["decision-1"],
             "execution_evidence": [
@@ -240,6 +338,7 @@ class RuntimeContractTests(unittest.TestCase):
             "run_id": "run-1",
             "outcome": "blocked",
             "rationale": "waiting",
+            "template_selections": [],
             "blocked_reason": "need operator input",
             "question_or_failure_refs": ["env-question-1"],
         }
@@ -254,6 +353,7 @@ class RuntimeContractTests(unittest.TestCase):
             "run_id": "run-1",
             "outcome": "accepted",
             "rationale": "validated",
+            "template_selections": [{"attempt_id": "attempt-1", **selected_identity()}],
             "validated_attempt_refs": ["attempt-1"],
             "orchestrator_decision_refs": ["decision-1"],
             "execution_evidence": [

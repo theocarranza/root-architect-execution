@@ -21,7 +21,21 @@ Return exactly one fenced `json` block in this shape, and nothing else. Root val
   "schema_version": 2,
   "run_id": "<text>",
   "outcome": "accepted|rejected|blocked|abandoned",
-  "rationale": "<text>"
+  "rationale": "<text>",
+  "template_selections": [
+    {
+      "attempt_id": "<text>",
+      "family": "implementer|spec-validator|quality-validator",
+      "selected_template": "<text>",
+      "template_catalog_sha256": "<text>",
+      "requested_model_tier": "cheap|mid|strong",
+      "requested_effort": "low|medium|high|xhigh|max",
+      "resolved_model": "<text>",
+      "resolved_effort": "low|medium|high|xhigh|max|None",
+      "effective_model": "<text>",
+      "effective_effort": "low|medium|high|xhigh|max|None"
+    }
+  ]
 }
 ```
 

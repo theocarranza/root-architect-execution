@@ -1,0 +1,544 @@
+{
+  "schema_version": 1,
+  "host": "cursor",
+  "templates": [
+    {
+      "template_id": "impl-executor-cheap",
+      "family": "implementer",
+      "requested": {
+        "model_tier": "cheap",
+        "effort": "low"
+      },
+      "resolved": {
+        "model": "claude-haiku-4-5",
+        "effort": "low"
+      },
+      "permissions": {
+        "mutation": "write-scoped",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files",
+            "edit-files",
+            "create-files",
+            "run-commands"
+          ],
+          "deny": [
+            "delegate"
+          ],
+          "shell_purpose": "Run the brief's acceptance commands to observe RED and then GREEN counts. Not for Git, not for installs, not for exploration."
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "handoff-to-peer",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "implementer-report.schema.json"
+      },
+      "alias_of": null,
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "impl-executor-mid",
+      "family": "implementer",
+      "requested": {
+        "model_tier": "mid",
+        "effort": "medium"
+      },
+      "resolved": {
+        "model": "claude-sonnet-5",
+        "effort": "medium"
+      },
+      "permissions": {
+        "mutation": "write-scoped",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files",
+            "edit-files",
+            "create-files",
+            "run-commands"
+          ],
+          "deny": [
+            "delegate"
+          ],
+          "shell_purpose": "Run the brief's acceptance commands to observe RED and then GREEN counts. Not for Git, not for installs, not for exploration."
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "handoff-to-peer",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "implementer-report.schema.json"
+      },
+      "alias_of": null,
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "impl-executor-strong",
+      "family": "implementer",
+      "requested": {
+        "model_tier": "strong",
+        "effort": "high"
+      },
+      "resolved": {
+        "model": "claude-opus-5",
+        "effort": "high"
+      },
+      "permissions": {
+        "mutation": "write-scoped",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files",
+            "edit-files",
+            "create-files",
+            "run-commands"
+          ],
+          "deny": [
+            "delegate"
+          ],
+          "shell_purpose": "Run the brief's acceptance commands to observe RED and then GREEN counts. Not for Git, not for installs, not for exploration."
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "handoff-to-peer",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "implementer-report.schema.json"
+      },
+      "alias_of": null,
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "impl-executor",
+      "family": "implementer",
+      "requested": {
+        "model_tier": "cheap",
+        "effort": "low"
+      },
+      "resolved": {
+        "model": "claude-haiku-4-5",
+        "effort": "low"
+      },
+      "permissions": {
+        "mutation": "write-scoped",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files",
+            "edit-files",
+            "create-files",
+            "run-commands"
+          ],
+          "deny": [
+            "delegate"
+          ],
+          "shell_purpose": "Run the brief's acceptance commands to observe RED and then GREEN counts. Not for Git, not for installs, not for exploration."
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "handoff-to-peer",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "implementer-report.schema.json"
+      },
+      "alias_of": "impl-executor-cheap",
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "quality-validator-cheap",
+      "family": "quality-validator",
+      "requested": {
+        "model_tier": "cheap",
+        "effort": "medium"
+      },
+      "resolved": {
+        "model": "claude-haiku-4-5",
+        "effort": "medium"
+      },
+      "permissions": {
+        "mutation": "read-and-run",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files",
+            "run-commands"
+          ],
+          "deny": [
+            "edit-files",
+            "create-files",
+            "delegate"
+          ],
+          "shell_purpose": "Rerun exactly the acceptance commands the brief names and report the counts observed. Never to write, stage, or commit."
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "edit-files",
+          "handoff-to-peer",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "validator-verdict.schema.json"
+      },
+      "alias_of": null,
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "quality-validator-mid",
+      "family": "quality-validator",
+      "requested": {
+        "model_tier": "mid",
+        "effort": "medium"
+      },
+      "resolved": {
+        "model": "claude-sonnet-5",
+        "effort": "medium"
+      },
+      "permissions": {
+        "mutation": "read-and-run",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files",
+            "run-commands"
+          ],
+          "deny": [
+            "edit-files",
+            "create-files",
+            "delegate"
+          ],
+          "shell_purpose": "Rerun exactly the acceptance commands the brief names and report the counts observed. Never to write, stage, or commit."
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "edit-files",
+          "handoff-to-peer",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "validator-verdict.schema.json"
+      },
+      "alias_of": null,
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": true,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "quality-validator-strong",
+      "family": "quality-validator",
+      "requested": {
+        "model_tier": "strong",
+        "effort": "high"
+      },
+      "resolved": {
+        "model": "claude-opus-5",
+        "effort": "high"
+      },
+      "permissions": {
+        "mutation": "read-and-run",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files",
+            "run-commands"
+          ],
+          "deny": [
+            "edit-files",
+            "create-files",
+            "delegate"
+          ],
+          "shell_purpose": "Rerun exactly the acceptance commands the brief names and report the counts observed. Never to write, stage, or commit."
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "edit-files",
+          "handoff-to-peer",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "validator-verdict.schema.json"
+      },
+      "alias_of": null,
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "quality-validator",
+      "family": "quality-validator",
+      "requested": {
+        "model_tier": "cheap",
+        "effort": "medium"
+      },
+      "resolved": {
+        "model": "claude-haiku-4-5",
+        "effort": "medium"
+      },
+      "permissions": {
+        "mutation": "read-and-run",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files",
+            "run-commands"
+          ],
+          "deny": [
+            "edit-files",
+            "create-files",
+            "delegate"
+          ],
+          "shell_purpose": "Rerun exactly the acceptance commands the brief names and report the counts observed. Never to write, stage, or commit."
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "edit-files",
+          "handoff-to-peer",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "validator-verdict.schema.json"
+      },
+      "alias_of": "quality-validator-cheap",
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "root-architect",
+      "family": "root",
+      "requested": {
+        "model_tier": "strong",
+        "effort": "high"
+      },
+      "resolved": {
+        "model": "claude-opus-5",
+        "effort": "high"
+      },
+      "permissions": {
+        "mutation": "write-scoped",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files",
+            "edit-files",
+            "create-files",
+            "run-commands",
+            "delegate"
+          ],
+          "deny": [],
+          "shell_purpose": "Git, the ledger, and the gate scripts - validate_roles.py, validate_interfaces.py, render_agents.py, root_preflight.py, job_queue.py. Root's shell is broad because Git is root's job; it is not a licence to do a worker's work in it."
+        },
+        "must_not": [
+          "handoff-to-peer",
+          "interfere-with-dispatch",
+          "widen-scope"
+        ],
+        "returns": "none"
+      },
+      "alias_of": null,
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "spec-validator-cheap",
+      "family": "spec-validator",
+      "requested": {
+        "model_tier": "cheap",
+        "effort": "medium"
+      },
+      "resolved": {
+        "model": "claude-haiku-4-5",
+        "effort": "medium"
+      },
+      "permissions": {
+        "mutation": "read-only",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files"
+          ],
+          "deny": [
+            "edit-files",
+            "create-files",
+            "run-commands",
+            "delegate"
+          ]
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "edit-files",
+          "handoff-to-peer",
+          "run-commands",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "validator-verdict.schema.json"
+      },
+      "alias_of": null,
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "spec-validator-mid",
+      "family": "spec-validator",
+      "requested": {
+        "model_tier": "mid",
+        "effort": "medium"
+      },
+      "resolved": {
+        "model": "claude-sonnet-5",
+        "effort": "medium"
+      },
+      "permissions": {
+        "mutation": "read-only",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files"
+          ],
+          "deny": [
+            "edit-files",
+            "create-files",
+            "run-commands",
+            "delegate"
+          ]
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "edit-files",
+          "handoff-to-peer",
+          "run-commands",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "validator-verdict.schema.json"
+      },
+      "alias_of": null,
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": true,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "spec-validator-strong",
+      "family": "spec-validator",
+      "requested": {
+        "model_tier": "strong",
+        "effort": "high"
+      },
+      "resolved": {
+        "model": "claude-opus-5",
+        "effort": "high"
+      },
+      "permissions": {
+        "mutation": "read-only",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files"
+          ],
+          "deny": [
+            "edit-files",
+            "create-files",
+            "run-commands",
+            "delegate"
+          ]
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "edit-files",
+          "handoff-to-peer",
+          "run-commands",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "validator-verdict.schema.json"
+      },
+      "alias_of": null,
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    },
+    {
+      "template_id": "spec-validator",
+      "family": "spec-validator",
+      "requested": {
+        "model_tier": "cheap",
+        "effort": "medium"
+      },
+      "resolved": {
+        "model": "claude-haiku-4-5",
+        "effort": "medium"
+      },
+      "permissions": {
+        "mutation": "read-only",
+        "tools": {
+          "allow": [
+            "read-files",
+            "search-files"
+          ],
+          "deny": [
+            "edit-files",
+            "create-files",
+            "run-commands",
+            "delegate"
+          ]
+        },
+        "must_not": [
+          "ask-owner",
+          "commit",
+          "edit-files",
+          "handoff-to-peer",
+          "run-commands",
+          "spawn-agents",
+          "stage",
+          "widen-scope"
+        ],
+        "returns": "validator-verdict.schema.json"
+      },
+      "alias_of": "spec-validator-cheap",
+      "collapsed_model_tier": false,
+      "collapsed_effort_tier": false,
+      "collapsed_from_previous": false
+    }
+  ],
+  "catalog_sha256": "bad53fcd692892d27595eccd3af30e43185939c485a68de44585649ea8ded10f"
+}

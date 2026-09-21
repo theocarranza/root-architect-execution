@@ -13,6 +13,23 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import check_return  # noqa: E402
 import runtime_contract  # noqa: E402
 from jsonschema_mini import Validator  # noqa: E402
+import render_agents  # noqa: E402
+
+
+def selection_identity(template_id="impl-executor-cheap"):
+    catalog = render_agents.select_catalog("codex")
+    selected = render_agents.select_template(catalog, template_id)
+    return {
+        "family": selected["family"],
+        "selected_template": selected["template_id"],
+        "template_catalog_sha256": catalog["catalog_sha256"],
+        "requested_model_tier": selected["requested"]["model_tier"],
+        "requested_effort": selected["requested"]["effort"],
+        "resolved_model": selected["resolved"]["model"],
+        "resolved_effort": selected["resolved"]["effort"],
+        "effective_model": None,
+        "effective_effort": None,
+    }
 
 
 def report(**changes):
@@ -149,6 +166,7 @@ class RuntimeReturnTests(unittest.TestCase):
             "run_id": "run-1",
             "outcome": "accepted",
             "rationale": "validated",
+            "template_selections": [{"attempt_id": "attempt-1", **selection_identity()}],
             "validated_attempt_refs": ["attempt-1"],
             "orchestrator_decision_refs": ["decision-1"],
             "execution_evidence": [

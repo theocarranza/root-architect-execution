@@ -10,11 +10,28 @@ import json
 import sqlite3
 from pathlib import Path
 
-from runtime_contract import validate_record, validate_attempt_transition, validate_outcome
+from runtime_contract import (
+    validate_attempt,
+    validate_attempt_transition,
+    validate_outcome,
+    validate_record,
+)
+import render_agents
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 BUSY_TIMEOUT_MS = 2_000
+TEMPLATE_IDENTITY_FIELDS = (
+    "family",
+    "selected_template",
+    "template_catalog_sha256",
+    "requested_model_tier",
+    "requested_effort",
+    "resolved_model",
+    "resolved_effort",
+    "effective_model",
+    "effective_effort",
+)
 
 
 class StorageError(RuntimeError):
@@ -154,6 +171,16 @@ class RuntimeStore:
                     "ON decisions(run_id, attempt_id) WHERE attempt_id IS NOT NULL"
                 )
                 connection.execute("INSERT INTO schema_migrations(version) VALUES (4)")
+            if 5 not in applied:
+                connection.execute("""
+                CREATE TABLE run_template_catalogs (
+                    run_id TEXT PRIMARY KEY REFERENCES runs(run_id),
+                    host_id TEXT NOT NULL,
+                    catalog_sha256 TEXT NOT NULL,
+                    catalog_json TEXT NOT NULL
+                )
+                """)
+                connection.execute("INSERT INTO schema_migrations(version) VALUES (5)")
 
     @contextlib.contextmanager
     def _mutation(self):
@@ -184,14 +211,35 @@ class RuntimeStore:
     def fail_next_write_for_test(self):
         self._fail_next_write = True
 
-    def create_run(self, record):
+    def create_run(self, record, template_catalog):
+        """Persist a run and its explicit controller-owned catalog snapshot.
+
+        This local store does not authenticate the caller. The host boundary
+        must supply the catalog from trusted controller state.
+        """
         errors = validate_record("run", record)
         if errors:
             raise StorageError("invalid run: " + "; ".join(errors))
+        catalog_errors = render_agents.validate_catalog(template_catalog)
+        if catalog_errors:
+            raise StorageError(
+                "invalid controller-owned template catalog: " + "; ".join(catalog_errors)
+            )
+        if record["host_id"] != template_catalog["host"]:
+            raise StorageError("template catalog host does not match the run host")
         with self._mutation() as connection:
             connection.execute(
                 "INSERT INTO runs(run_id, record_json, state) VALUES (?, ?, ?)",
                 (record["run_id"], self._json(record), record["state"]),
+            )
+            connection.execute(
+                "INSERT INTO run_template_catalogs(run_id, host_id, catalog_sha256, catalog_json) VALUES (?, ?, ?, ?)",
+                (
+                    record["run_id"],
+                    template_catalog["host"],
+                    template_catalog["catalog_sha256"],
+                    self._json(template_catalog),
+                ),
             )
 
     def create_attempt(self, record):
@@ -264,6 +312,20 @@ class RuntimeStore:
             ):
                 raise StorageError("workspace fingerprint does not match the run")
             run_record = json.loads(run[0])
+            catalog_row = connection.execute(
+                "SELECT host_id, catalog_sha256, catalog_json FROM run_template_catalogs WHERE run_id=?",
+                (record["run_id"],),
+            ).fetchone()
+            if catalog_row is None:
+                raise StorageError("run has no persisted controller-owned template catalog")
+            catalog = json.loads(catalog_row["catalog_json"])
+            if catalog_row["host_id"] != run_record["host_id"] or catalog_row[
+                "catalog_sha256"
+            ] != catalog.get("catalog_sha256"):
+                raise StorageError("persisted template catalog identity is inconsistent")
+            errors = validate_attempt(record, catalog)
+            if errors:
+                raise StorageError("invalid attempt template selection: " + "; ".join(errors))
             dispatch_errors = validate_record("envelope", dispatch_envelope)
             if dispatch_errors:
                 raise StorageError("invalid dispatch envelope: " + "; ".join(dispatch_errors))
@@ -277,6 +339,7 @@ class RuntimeStore:
                 "captured_by": run_record["principal_id"],
                 "selected_template": record["selected_template"],
             }
+            expected_dispatch.update({field: record[field] for field in TEMPLATE_IDENTITY_FIELDS})
             if any(dispatch_envelope.get(key) != value for key, value in expected_dispatch.items()):
                 raise StorageError("dispatch envelope does not match the controller-owned attempt")
             existing = connection.execute(
@@ -680,6 +743,13 @@ class RuntimeStore:
                 raise StorageError(
                     "report does not match the selected template and dispatched launch"
                 )
+            if any(
+                envelope.get(field) != attempt_record.get(field)
+                for field in TEMPLATE_IDENTITY_FIELDS
+            ):
+                raise StorageError(
+                    "report template provenance does not match the persisted attempt"
+                )
             existing = connection.execute(
                 "SELECT * FROM envelopes WHERE dedup_key = ?", (dedup_key,)
             ).fetchone()
@@ -902,8 +972,17 @@ class RuntimeStore:
             run_row = connection.execute(
                 "SELECT record_json FROM runs WHERE run_id=?", (outcome.get("run_id"),)
             ).fetchone()
+            catalog_row = connection.execute(
+                "SELECT catalog_sha256, catalog_json FROM run_template_catalogs WHERE run_id=?",
+                (outcome.get("run_id"),),
+            ).fetchone()
         if run_row is None:
             return ["accepted outcome references an unknown run"]
+        if catalog_row is None:
+            return ["accepted outcome run has no persisted template catalog"]
+        catalog = json.loads(catalog_row["catalog_json"])
+        if catalog_row["catalog_sha256"] != catalog.get("catalog_sha256"):
+            return ["accepted outcome run has inconsistent template catalog identity"]
         run_principal = json.loads(run_row[0])["principal_id"]
         required_families = {"implementation", "specification", "quality"}
         referenced_decisions = outcome.get("orchestrator_decision_refs", [])
@@ -919,6 +998,7 @@ class RuntimeStore:
             outcome,
             controller_principal,
             set(captured_evidence_refs).intersection(evidence),
+            {catalog_row["catalog_sha256"]: catalog},
         )
         if errors:
             return errors

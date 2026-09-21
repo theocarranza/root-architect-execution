@@ -30,8 +30,52 @@ REQUIRED_ROLES = {"implementer", "spec-validator", "quality-validator"}
 def check_roles(problems):
     roles = render_agents.load_roles()
     seen = {}
+    catalogs = {}
+    for host_name in sorted(path.stem for path in (ROOT / "hosts").glob("*.json")):
+        try:
+            catalog = render_agents.select_catalog(host_name)
+            catalog_errors = render_agents.validate_catalog(catalog)
+            if catalog_errors:
+                problems.extend(
+                    "hosts/%s catalog: %s" % (host_name, error) for error in catalog_errors
+                )
+            catalogs[host_name] = catalog
+        except (KeyError, ValueError) as exc:
+            problems.append("hosts/%s cannot select a template catalog: %s" % (host_name, exc))
     for role_file, role in roles:
         seen.setdefault(role["role"], []).append(role_file)
+        variants = role.get("variants", [])
+        if variants and role["kind"] != "worker":
+            problems.append("roles/%s declares variants but is not a worker family" % role_file)
+        names = [variant["id"] for variant in variants]
+        if len(names) != len(set(names)) or any(
+            not name.startswith(role["id"] + "-") for name in names
+        ):
+            problems.append(
+                "roles/%s has duplicate or out-of-family template identifiers" % role_file
+            )
+        declared_settings = {
+            variant["id"]: {"model_tier": variant["model"], "effort": variant["reasoning"]}
+            for variant in variants
+        }
+        if variants:
+            for host_name, catalog in catalogs.items():
+                allowed, _reason = render_agents.role_targets_host(role, host_name)
+                if not allowed:
+                    continue
+                family_entries = [
+                    entry for entry in catalog["templates"] if entry["family"] == role["role"]
+                ]
+                generated_settings = {
+                    entry["template_id"]: entry["requested"]
+                    for entry in family_entries
+                    if entry["alias_of"] is None
+                }
+                if generated_settings != declared_settings:
+                    problems.append(
+                        "roles/%s variants differ from the selected %s catalog"
+                        % (role_file, host_name)
+                    )
 
         prose = ROOT / role["prose"]
         if not prose.exists():
@@ -188,38 +232,19 @@ def check_host(name, roles, problems):
         (p for p in render_agents.both_positions(name, host["bundled_dir"]) if p.is_dir()),
         ROOT / host["bundled_dir"],
     )
-    extension = ".toml" if host["format"] == "toml" else ".md"
-    render = (
-        render_agents.render_toml
-        if host["format"] == "toml"
-        else render_agents.render_markdown_yaml
-    )
-
-    for role_file, role in roles:
-        allowed, reason = render_agents.role_targets_host(role, name)
-        if not allowed:
-            # Not a problem: the renderer deliberately does not build this role
-            # here, and demanding the file would demand the thing the interface
-            # gate refuses.
-            if (out_dir / (role["id"] + extension)).exists():
-                problems.append(
-                    "%s: %s exists but should not - %s"
-                    % (name, out_dir / (role["id"] + extension), reason)
-                )
-            continue
-        target = out_dir / (role["id"] + extension)
+    expected_files = render_agents.rendered_agents(name, host.get("root_placeholder"))
+    for filename, expected in expected_files.items():
+        target = out_dir / filename
         if not target.exists():
             problems.append(
-                "%s: %s has not been generated (run render_agents.py "
-                "--host %s)" % (name, target, name)
+                "%s: %s has not been generated (run render_agents.py --host %s)"
+                % (name, target, name)
             )
             continue
-        expected = render(role, host, role_file)
         if target.read_text(encoding="utf-8") != expected:
             problems.append(
-                "%s: %s no longer matches roles/%s and "
-                "hosts/%s.json; regenerate rather than hand-editing"
-                % (name, target, role_file, name)
+                "%s: %s no longer matches the selected catalog and host; regenerate rather than hand-editing"
+                % (name, target)
             )
 
     for field in host["required_fields"]:

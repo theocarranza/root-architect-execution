@@ -276,13 +276,13 @@ These assertions describe required observations; tests must induce the failures 
 
 **Files:** modify `schemas/agent-role.schema.json`, `roles/*.json`, `scripts/render_agents.py`, `scripts/validate_roles.py`, `adapters/codex/install.py`, and `schemas/brief.schema.json`; create `schemas/template-catalog.schema.json` and `tests/test_runtime_templates.py`.
 
-- [ ] Add family-contained named variants using the table above; retain one declaration per logical position. Reuse existing model/effort structures rather than introducing conflicting copies.
-- [ ] Render the catalog and agent files from the same selection function. Preserve explicit model and effort in Codex variants; never rely on spawn overrides to defeat fixed template values.
-- [ ] Make installer, interface validator, smoke expectations, and guard role resolution use the generated catalog. Remove hard-coded three-worker-name lists that would bypass or reject variants.
-- [ ] Record family, selected template, requested/resolved/effective settings and catalog hash throughout brief, attempt, capture metadata, and outcome. Missing effective values do not become invented observations.
-- [ ] Validate selected model/effort combinations per host. When host tiers collapse to the same model or effort, disclose it and avoid counting that selection as a real escalation.
-- [ ] Require a recorded reason before changing tier after failure. Undeclared templates and dynamic definitions fail admission.
-- [ ] Define compatibility aliases for old worker names as fixed catalog entries during migration; they cannot silently select a stronger variant or bypass permissions.
+- [x] Add family-contained named variants using the table above; retain one declaration per logical position. Reuse existing model/effort structures rather than introducing conflicting copies.
+- [x] Render the catalog and agent files from the same selection function. Preserve explicit model and effort in Codex variants; never rely on spawn overrides to defeat fixed template values.
+- [x] Make installer, interface validator, smoke expectations, and guard role resolution use the generated catalog. Remove hard-coded three-worker-name lists that would bypass or reject variants.
+- [x] Record family, selected template, requested/resolved/effective settings and catalog hash throughout brief, attempt, capture metadata, and outcome. Missing effective values do not become invented observations.
+- [x] Validate selected model/effort combinations per host. When host tiers collapse to the same model or effort, disclose it and avoid counting that selection as a real escalation.
+- [x] Require a recorded reason before changing tier after failure. Undeclared templates and dynamic definitions fail admission.
+- [x] Define compatibility aliases for old worker names as fixed catalog entries during migration; they cannot silently select a stronger variant or bypass permissions.
 
 **Validation:** `python3 -m unittest tests.test_runtime_templates -v`; role/render/interface checks for every declared host. Compare installed catalog and file hashes, not merely the number of generated files.
 

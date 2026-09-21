@@ -11,6 +11,23 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from runtime_store import RuntimeStore, StorageError  # noqa: E402
 import runtime_contract  # noqa: E402
+import render_agents  # noqa: E402
+
+
+def selected_identity(template_id="impl-executor-cheap"):
+    catalog = render_agents.select_catalog("codex")
+    selected = render_agents.select_template(catalog, template_id)
+    return {
+        "family": selected["family"],
+        "selected_template": selected["template_id"],
+        "template_catalog_sha256": catalog["catalog_sha256"],
+        "requested_model_tier": selected["requested"]["model_tier"],
+        "requested_effort": selected["requested"]["effort"],
+        "resolved_model": selected["resolved"]["model"],
+        "resolved_effort": selected["resolved"]["effort"],
+        "effective_model": None,
+        "effective_effort": None,
+    }
 
 
 def reserve_in_process(root, run_id, attempt_id, result):
@@ -33,13 +50,17 @@ def run_record(run_id):
     return {
         "schema_version": 2,
         "run_id": run_id,
-        "host_id": "offline",
+        "host_id": "codex",
         "workspace_fingerprint": "workspace",
         "configuration_fingerprint": "config",
         "principal_id": "controller:local-1",
         "created_at": "2026-09-20T00:00:00Z",
         "state": "created",
     }
+
+
+def create_run(store, record):
+    return store.create_run(record, render_agents.select_catalog("codex"))
 
 
 def attempt(run_id, task_id, attempt_id, state="reserved"):
@@ -51,7 +72,7 @@ def attempt(run_id, task_id, attempt_id, state="reserved"):
         "provider_thread_id": None,
         "provider_turn_id": None,
         "provider_event_id": None,
-        "selected_template": "impl-executor-cheap",
+        **selected_identity(),
         "started_at": "2026-09-20T00:00:00Z",
         "last_activity_at": "2026-09-20T00:00:00Z",
         "deadline_at": "2026-09-20T01:00:00Z",
@@ -79,7 +100,7 @@ def dispatch(record, envelope_id):
             "captured_by": "controller:local-1",
             "capture_source": "controller",
             "reply_to": None,
-            "selected_template": record["selected_template"],
+            **{field: record[field] for field in selected_identity()},
             "body_sha256": hashlib.sha256(body).hexdigest(),
             "created_at": "2026-09-20T00:00:00Z",
             "provider_thread_id": None,
@@ -99,8 +120,8 @@ class RuntimeLifecycleTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_simultaneous_reservations_allow_one_workspace_writer(self):
-        self.store.create_run(run_record("r1"))
-        self.store.create_run(run_record("r2"))
+        create_run(self.store, run_record("r1"))
+        create_run(self.store, run_record("r2"))
         result = multiprocessing.Queue()
         processes = [
             multiprocessing.Process(
@@ -117,13 +138,13 @@ class RuntimeLifecycleTests(unittest.TestCase):
         self.assertCountEqual(["reserved", "rejected"], [result.get(timeout=2) for _ in processes])
 
     def test_direct_active_attempt_creation_cannot_bypass_launch_reservation(self):
-        self.store.create_run(run_record("r1"))
+        create_run(self.store, run_record("r1"))
         for state in ("reserved", "active", "cancel_requested", "validated"):
             with self.subTest(state=state), self.assertRaises(StorageError):
                 self.store.create_attempt(attempt("r1", "t1", "a-" + state, state))
 
     def test_report_replay_keeps_one_envelope_and_one_terminal_transition(self):
-        self.store.create_run(run_record("r1"))
+        create_run(self.store, run_record("r1"))
         record = attempt("r1", "t1", "a1")
         self.store.reserve_attempt(
             record, "workspace", "launch-1", "parent-1", *dispatch(record, "task-env")
@@ -143,6 +164,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
             "captured_by": "controller:local-1",
             "capture_source": "controller",
             "reply_to": "task-env",
+            **selected_identity(),
             "body_sha256": hashlib.sha256(body).hexdigest(),
             "created_at": "2026-09-20T00:10:00Z",
             "provider_thread_id": None,
@@ -150,7 +172,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
             "provider_event_id": None,
         }
         envelope["provider_thread_id"] = "provider-child-1"
-        envelope["selected_template"] = "impl-executor-cheap"
+        envelope.update(selected_identity())
         first = self.store.capture_result(envelope, body, "launch-1:report", "captured")
         replay = self.store.capture_result(envelope, body, "launch-1:report", "captured")
         self.assertFalse(first["replayed"])
@@ -162,7 +184,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
         self.assertTrue(runtime_contract.validate_attempt_transition("validated", "active"))
 
     def test_crash_after_host_start_reconciles_by_key_without_relaunch(self):
-        self.store.create_run(run_record("r1"))
+        create_run(self.store, run_record("r1"))
         record = attempt("r1", "t1", "a1")
         self.store.reserve_attempt(
             record, "workspace", "launch-key", "parent-1", *dispatch(record, "task-env")
@@ -187,7 +209,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
         self.assertEqual(1, restarted.count("attempts"))
 
     def test_capture_rejects_report_with_wrong_template_or_reply(self):
-        self.store.create_run(run_record("r1"))
+        create_run(self.store, run_record("r1"))
         record = attempt("r1", "t1", "a1")
         self.store.reserve_attempt(
             record, "workspace", "launch", "parent", *dispatch(record, "task-env")
@@ -196,16 +218,16 @@ class RuntimeLifecycleTests(unittest.TestCase):
         self.store.record_launch_started("a1", "child")
         body = b"report"
         envelope = self._report_envelope(body, "r1", "t1", "a1", "child")
-        envelope["selected_template"] = "spec-validator-cheap"
+        envelope.update(selected_identity("spec-validator-cheap"))
         with self.assertRaises(StorageError):
             self.store.capture_result(envelope, body, "event-template", "captured")
-        envelope["selected_template"] = "impl-executor-cheap"
+        envelope.update(selected_identity())
         envelope["reply_to"] = "other-task"
         with self.assertRaises(StorageError):
             self.store.capture_result(envelope, body, "event-reply", "captured")
 
     def test_worker_question_cannot_be_captured_as_a_terminal_return(self):
-        self.store.create_run(run_record("r1"))
+        create_run(self.store, run_record("r1"))
         record = attempt("r1", "t1", "a1")
         self.store.reserve_attempt(
             record, "workspace", "launch", "parent", *dispatch(record, "task-env")
@@ -219,7 +241,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
             self.store.capture_result(envelope, body, "event-question", "captured")
 
     def test_report_captured_by_another_controller_is_rejected(self):
-        self.store.create_run(run_record("r1"))
+        create_run(self.store, run_record("r1"))
         record = attempt("r1", "t1", "a1")
         self.store.reserve_attempt(
             record, "workspace", "launch", "parent", *dispatch(record, "task-env")
@@ -233,7 +255,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
             self.store.capture_result(envelope, body, "event-wrong-controller", "captured")
 
     def test_repair_attempt_has_immutable_parent_and_one_format_correction(self):
-        self.store.create_run(run_record("r1"))
+        create_run(self.store, run_record("r1"))
         original = attempt("r1", "t1", "a1")
         self.store.reserve_attempt(
             original, "workspace", "launch-1", "parent", *dispatch(original, "task-env")
@@ -298,8 +320,8 @@ class RuntimeLifecycleTests(unittest.TestCase):
         self.assertEqual("invalid", self.store.attempt_state("a1"))
 
     def test_accepted_outcome_requires_linked_decisions_for_validated_attempts(self):
-        self.store.create_run(run_record("r1"))
-        attempt_refs, decision_refs, envelope_refs, evidence = [], [], [], []
+        create_run(self.store, run_record("r1"))
+        attempt_refs, decision_refs, envelope_refs, evidence, selections = [], [], [], [], []
         parent_attempt_id = None
         for index, (family, template) in enumerate(
             (
@@ -311,7 +333,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
         ):
             attempt_id, task_id = "a%d" % index, "t%d" % index
             record = attempt("r1", task_id, attempt_id)
-            record["selected_template"] = template
+            record.update(selected_identity(template))
             dispatch_record, dispatch_body = dispatch(record, "task-%d-env" % index)
             if parent_attempt_id is None:
                 self.store.reserve_attempt(
@@ -336,10 +358,13 @@ class RuntimeLifecycleTests(unittest.TestCase):
             self.store.begin_launch(attempt_id)
             self.store.record_launch_started(attempt_id, "child-%d" % index)
             body = ("%s report" % family).encode()
-            envelope = self._report_envelope(body, "r1", task_id, attempt_id, "child-%d" % index)
+            envelope = self._report_envelope(
+                body, "r1", task_id, attempt_id, "child-%d" % index, template
+            )
             envelope["from"] = "worker:" + template
             envelope["reply_to"] = "task-%d-env" % index
             envelope["selected_template"] = template
+            envelope.update(selected_identity(template))
             envelope["envelope_id"] = "env-%d" % index
             self.store.capture_result(envelope, body, "event-%d" % index, "captured")
             self.store.record_machine_validation(attempt_id, True, "valid-%d" % index)
@@ -348,6 +373,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
                 "r1", decision_id, family, "accept", attempt_id, "controller:local-1"
             )
             attempt_refs.append(attempt_id)
+            selections.append({"attempt_id": attempt_id, **selected_identity(template)})
             decision_refs.append(decision_id)
             envelope_refs.append(envelope["envelope_id"])
             parent_attempt_id = attempt_id
@@ -369,6 +395,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
             "run_id": "r1",
             "outcome": "accepted",
             "rationale": "all linked stages accepted",
+            "template_selections": selections,
             "validated_attempt_refs": attempt_refs,
             "orchestrator_decision_refs": decision_refs,
             "execution_evidence": evidence,
@@ -377,9 +404,17 @@ class RuntimeLifecycleTests(unittest.TestCase):
             [],
             self.store.validate_accepted_outcome(outcome, "controller:local-1", set(envelope_refs)),
         )
+        tampered = dict(outcome)
+        tampered["template_selections"] = [dict(selection) for selection in selections]
+        tampered["template_selections"][0]["resolved_model"] = "invented-model"
+        self.assertTrue(
+            self.store.validate_accepted_outcome(tampered, "controller:local-1", set(envelope_refs))
+        )
 
     @staticmethod
-    def _report_envelope(body, run_id, task_id, attempt_id, provider_thread_id):
+    def _report_envelope(
+        body, run_id, task_id, attempt_id, provider_thread_id, template_id="impl-executor-cheap"
+    ):
         return {
             "schema_version": 2,
             "envelope_id": "env-" + hashlib.sha256(body).hexdigest()[:8],
@@ -392,7 +427,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
             "captured_by": "controller:local-1",
             "capture_source": "controller",
             "reply_to": "task-env",
-            "selected_template": "impl-executor-cheap",
+            **selected_identity(template_id),
             "body_sha256": hashlib.sha256(body).hexdigest(),
             "created_at": "2026-09-20T00:10:00Z",
             "provider_thread_id": provider_thread_id,
@@ -401,12 +436,16 @@ class RuntimeLifecycleTests(unittest.TestCase):
         }
 
     def test_accepted_outcome_requires_implementation_specification_and_quality_decisions(self):
-        self.store.create_run(run_record("r1"))
+        create_run(self.store, run_record("r1"))
         outcome = {
             "schema_version": 2,
             "run_id": "r1",
             "outcome": "accepted",
             "rationale": "done",
+            "template_selections": [
+                {"attempt_id": "impl", **selected_identity()},
+                {"attempt_id": "spec", **selected_identity("spec-validator-cheap")},
+            ],
             "validated_attempt_refs": ["impl", "spec"],
             "orchestrator_decision_refs": ["d1"],
             "execution_evidence": [

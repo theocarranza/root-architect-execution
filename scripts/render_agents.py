@@ -17,6 +17,8 @@ instruction is all there is.
 """
 
 import argparse
+import copy
+import hashlib
 import json
 import re
 import sys
@@ -108,6 +110,229 @@ def load_host(name):
             "hosts/%s.json is not schema-conformant:\n  %s" % (name, "\n  ".join(errors))
         )
     return host
+
+
+def canonical_catalog_bytes(catalog):
+    """Canonical JSON bytes excluding the digest field itself."""
+    payload = dict(catalog)
+    payload.pop("catalog_sha256", None)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
+
+
+def catalog_sha256(catalog):
+    return hashlib.sha256(canonical_catalog_bytes(catalog)).hexdigest()
+
+
+def validate_catalog(catalog):
+    """Check schema, digest, and exact equality with controller declarations."""
+    errors = Validator(SCHEMAS / "template-catalog.schema.json").validate(catalog)
+    if errors:
+        return errors
+    if catalog["catalog_sha256"] != catalog_sha256(catalog):
+        return ["catalog_sha256 does not match canonical catalog contents"]
+    expected = select_catalog(catalog["host"])
+    if canonical_catalog_bytes(catalog) != canonical_catalog_bytes(expected):
+        return ["catalog entries differ from the fixed role declarations"]
+    return []
+
+
+def _permission_contract(role):
+    return {
+        "mutation": role["mutation"],
+        "tools": copy.deepcopy(role["tools"]),
+        "must_not": sorted(role["must_not"]),
+        "returns": role["returns"],
+    }
+
+
+def select_catalog(host_name):
+    """Build the fixed per-host catalog used by rendering and installation."""
+    host = load_host(host_name)
+    templates = []
+    for _filename, role in load_roles():
+        supported, _reason = role_targets_host(role, host_name)
+        if not supported:
+            continue
+        variants = role.get("variants")
+        candidates = list(
+            variants
+            or [
+                {
+                    "id": role["id"],
+                    "model": role["model"]["default"],
+                    "reasoning": role["reasoning"]["default"],
+                }
+            ]
+        )
+        if variants:
+            ids = [variant["id"] for variant in variants]
+            if len(ids) != len(set(ids)) or any(
+                not item.startswith(role["id"] + "-") for item in ids
+            ):
+                raise ValueError("variants must have unique names contained in their role family")
+        previous = None
+        for variant in candidates:
+            tier, effort = variant["model"], variant["reasoning"]
+            if tier not in host["model_map"]:
+                raise ValueError("host %s cannot resolve model tier %s" % (host_name, tier))
+            if host["capabilities"]["reasoning_effort"]["supported"]:
+                if not host.get("effort_map") or effort not in host["effort_map"]:
+                    raise ValueError(
+                        "host %s cannot resolve reasoning effort %s" % (host_name, effort)
+                    )
+                resolved_effort = host["effort_map"][effort]
+            else:
+                resolved_effort = None
+            resolved_model = host["model_map"][tier]
+            collapsed_model = bool(previous and previous["resolved"]["model"] == resolved_model)
+            collapsed_effort = bool(previous and previous["resolved"]["effort"] == resolved_effort)
+            entry = {
+                "template_id": variant["id"],
+                "family": role["role"],
+                "requested": {"model_tier": tier, "effort": effort},
+                "resolved": {"model": resolved_model, "effort": resolved_effort},
+                "permissions": _permission_contract(role),
+                "alias_of": None,
+                "collapsed_model_tier": collapsed_model,
+                "collapsed_effort_tier": collapsed_effort,
+                "collapsed_from_previous": collapsed_model,
+            }
+            templates.append(entry)
+            previous = entry
+        if variants:
+            default_model = role["model"]["default"]
+            default_effort = role["reasoning"]["default"]
+            baseline = next(
+                (
+                    entry
+                    for entry in templates
+                    if entry["family"] == role["role"]
+                    and entry["requested"]
+                    == {"model_tier": default_model, "effort": default_effort}
+                ),
+                None,
+            )
+            if baseline is None:
+                raise ValueError("worker family %s has no declared default variant" % role["id"])
+            templates.append(
+                {
+                    "template_id": role["id"],
+                    "family": role["role"],
+                    "requested": copy.deepcopy(baseline["requested"]),
+                    "resolved": copy.deepcopy(baseline["resolved"]),
+                    "permissions": copy.deepcopy(baseline["permissions"]),
+                    "alias_of": baseline["template_id"],
+                    "collapsed_model_tier": False,
+                    "collapsed_effort_tier": False,
+                    "collapsed_from_previous": False,
+                }
+            )
+    catalog = {"schema_version": 1, "host": host_name, "templates": templates}
+    identifiers = [entry["template_id"] for entry in templates]
+    if len(identifiers) != len(set(identifiers)):
+        raise ValueError("role declarations produce duplicate template identifiers")
+    catalog["catalog_sha256"] = catalog_sha256(catalog)
+    errors = Validator(SCHEMAS / "template-catalog.schema.json").validate(catalog)
+    if errors:
+        raise ValueError("generated catalog is invalid: " + "; ".join(errors))
+    return catalog
+
+
+def select_template(catalog, template_id, previous_template=None, escalation_reason=None):
+    """Resolve only declared catalog entries and require evidence for escalation."""
+    catalog_errors = validate_catalog(catalog)
+    if catalog_errors:
+        raise ValueError("invalid template catalog: " + "; ".join(catalog_errors))
+    matches = [entry for entry in catalog["templates"] if entry["template_id"] == template_id]
+    if len(matches) != 1:
+        raise ValueError("undeclared template: %s" % template_id)
+    selected = copy.deepcopy(matches[0])
+    selected["escalated_from"] = None
+    selected["escalation_reason"] = None
+    workers = {role["role"] for _filename, role in load_roles() if role["kind"] == "worker"}
+    if previous_template is None and selected["family"] in workers:
+        alias = next(
+            (
+                entry
+                for entry in catalog["templates"]
+                if entry["family"] == selected["family"] and entry["alias_of"]
+            ),
+            None,
+        )
+        baseline = next(
+            (
+                entry
+                for entry in catalog["templates"]
+                if alias and entry["template_id"] == alias["alias_of"]
+            ),
+            None,
+        )
+        if baseline is None or selected["requested"] != baseline["requested"]:
+            raise ValueError("initial worker selection must use the family default template")
+    if previous_template is not None:
+        previous = select_template(catalog, previous_template)
+        if selected["family"] != previous["family"]:
+            raise ValueError("template change must preserve the worker family")
+        if selected["requested"]["model_tier"] == previous["requested"]["model_tier"]:
+            if selected["requested"]["effort"] != previous["requested"]["effort"]:
+                raise ValueError("template change within one tier is not an escalation")
+        else:
+            tiers = {"cheap": 0, "mid": 1, "strong": 2}
+            if (
+                tiers[selected["requested"]["model_tier"]]
+                <= tiers[previous["requested"]["model_tier"]]
+            ):
+                raise ValueError("template change is not an escalation")
+            if selected["collapsed_model_tier"]:
+                raise ValueError("collapsed model tiers do not count as escalation")
+            if not isinstance(escalation_reason, str) or not escalation_reason.strip():
+                raise ValueError("escalation reason is required after failure")
+            selected["escalated_from"] = previous["template_id"]
+            selected["escalation_reason"] = escalation_reason.strip()
+    return selected
+
+
+def rendered_agents(host_name, root_placeholder=None):
+    """Return every generated host file from the same catalog selection."""
+    host = load_host(host_name)
+    if root_placeholder is not None:
+        host = dict(host, root_placeholder=str(root_placeholder))
+    catalog = select_catalog(host_name)
+    files = {}
+    renderer, extension = (
+        (render_toml, ".toml") if host["format"] == "toml" else (render_markdown_yaml, ".md")
+    )
+    roles_by_family = {role["role"]: (filename, role) for filename, role in load_roles()}
+    for entry in catalog["templates"]:
+        role_file, role = roles_by_family[entry["family"]]
+        concrete = role_for_catalog_entry(role, entry)
+        files[concrete["id"] + extension] = renderer(concrete, host, role_file)
+    files["template-catalog.json"] = json.dumps(catalog, indent=2, ensure_ascii=False) + "\n"
+    return files
+
+
+def role_for_catalog_entry(role, entry):
+    """Create a render-only role view from a fixed catalog entry."""
+    concrete = copy.deepcopy(role)
+    concrete["id"] = entry["template_id"]
+    concrete["model"]["default"] = entry["requested"]["model_tier"]
+    concrete["model"]["escalation"] = []
+    concrete["reasoning"]["default"] = entry["requested"]["effort"]
+    concrete["reasoning"]["escalation"] = []
+    concrete.pop("variants", None)
+    return concrete
+
+
+def render_host(host_name, out_dir, root_placeholder=None):
+    """Write files materialized from a single catalog/template selection."""
+    target = Path(out_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    files = rendered_agents(host_name, root_placeholder)
+    for name, content in files.items():
+        (target / name).write_text(content, encoding="utf-8")
+    return sorted(files)
 
 
 def format_allow_list(allow):
@@ -817,20 +1042,13 @@ def main(argv=None):
     render, extension = format_renderers[host["format"]]
 
     drifted, written, skipped, stale = [], [], [], []
-    for role_file, role in load_roles():
-        target = out_dir / (role["id"] + extension)
+    expected_files = rendered_agents(args.host, host.get("root_placeholder"))
+    for _role_file, role in load_roles():
         allowed, reason = role_targets_host(role, args.host)
         if not allowed:
             skipped.append((role["id"], reason))
-            # A file left behind from when the role DID target this host is
-            # worse than a missing one: it looks generated and current.
-            if target.exists():
-                if args.check:
-                    stale.append((str(target), reason))
-                else:
-                    target.unlink()
-            continue
-        content = render(role, host, role_file)
+    for filename, content in expected_files.items():
+        target = out_dir / filename
         if args.check:
             current = target.read_text(encoding="utf-8") if target.exists() else None
             if current != content:
@@ -839,6 +1057,28 @@ def main(argv=None):
         out_dir.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         written.append(str(target))
+
+    expected_names = set(expected_files)
+    for _role_file, role in load_roles():
+        names = [role["id"] + extension] + [v["id"] + extension for v in role.get("variants", [])]
+        allowed, reason = role_targets_host(role, args.host)
+        if not allowed:
+            for name in names:
+                path = out_dir / name
+                if path.exists():
+                    if args.check:
+                        stale.append((str(path), reason))
+                    else:
+                        path.unlink()
+        elif role.get("variants"):
+            # A removed declared variant must not linger as a usable agent.
+            prefix = role["id"] + "-"
+            for path in out_dir.glob(prefix + "*" + extension):
+                if path.name not in expected_names:
+                    if args.check:
+                        stale.append((str(path), "no longer declared in the family catalog"))
+                    else:
+                        path.unlink()
 
     if args.check:
         if drifted or stale:

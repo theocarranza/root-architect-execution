@@ -11,13 +11,30 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from runtime_store import RuntimeStore, StorageError, UnsupportedStorageRoot
+import render_agents
+
+
+def selected_identity():
+    catalog = render_agents.select_catalog("codex")
+    selected = render_agents.select_template(catalog, "impl-executor-cheap")
+    return {
+        "family": selected["family"],
+        "selected_template": selected["template_id"],
+        "template_catalog_sha256": catalog["catalog_sha256"],
+        "requested_model_tier": selected["requested"]["model_tier"],
+        "requested_effort": selected["requested"]["effort"],
+        "resolved_model": selected["resolved"]["model"],
+        "resolved_effort": selected["resolved"]["effort"],
+        "effective_model": None,
+        "effective_effort": None,
+    }
 
 
 def run_record(run_id="run-1"):
     return {
         "schema_version": 2,
         "run_id": run_id,
-        "host_id": "offline",
+        "host_id": "codex",
         "workspace_fingerprint": "ws",
         "configuration_fingerprint": "config",
         "principal_id": "controller:local-1",
@@ -35,7 +52,7 @@ def attempt_record():
         "provider_thread_id": None,
         "provider_turn_id": "turn-1",
         "provider_event_id": None,
-        "selected_template": "impl-executor-cheap",
+        **selected_identity(),
         "started_at": "2026-09-20T00:00:00Z",
         "last_activity_at": "2026-09-20T00:00:00Z",
         "deadline_at": "2026-09-20T01:00:00Z",
@@ -46,6 +63,10 @@ def attempt_record():
         "controller_lease_expires_at": "2026-09-20T01:00:00Z",
         "state": "reserved",
     }
+
+
+def create_run(store, record):
+    return store.create_run(record, render_agents.select_catalog("codex"))
 
 
 def envelope_record(body, event_id="provider-event-1"):
@@ -61,7 +82,7 @@ def envelope_record(body, event_id="provider-event-1"):
         "captured_by": "controller:local-1",
         "capture_source": "controller",
         "reply_to": "env-task-1",
-        "selected_template": "impl-executor-cheap",
+        **selected_identity(),
         "body_sha256": hashlib.sha256(body).hexdigest(),
         "created_at": "2026-09-20T00:02:00Z",
         "provider_thread_id": "thread-1",
@@ -102,7 +123,7 @@ class RuntimeStoreTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / ".root-architect" / "state"
         self.store = RuntimeStore(self.root)
-        self.store.create_run(run_record())
+        create_run(self.store, run_record())
         record = attempt_record()
         dispatch_body = b"task"
         dispatch_envelope = {
@@ -117,7 +138,7 @@ class RuntimeStoreTests(unittest.TestCase):
             "captured_by": "controller:local-1",
             "capture_source": "controller",
             "reply_to": None,
-            "selected_template": "impl-executor-cheap",
+            **selected_identity(),
             "body_sha256": hashlib.sha256(dispatch_body).hexdigest(),
             "created_at": "2026-09-20T00:00:00Z",
             "provider_thread_id": None,
@@ -132,6 +153,102 @@ class RuntimeStoreTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_reservation_rejects_template_identity_not_declared_by_run_catalog(self):
+        identity_fields = (
+            "family",
+            "selected_template",
+            "template_catalog_sha256",
+            "requested_model_tier",
+            "requested_effort",
+            "resolved_model",
+            "resolved_effort",
+            "effective_model",
+            "effective_effort",
+        )
+        for field, value in (
+            ("selected_template", "impl-executor-dynamic"),
+            ("template_catalog_sha256", "b" * 64),
+            ("requested_model_tier", "strong"),
+            ("resolved_model", "invented-model"),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                store = RuntimeStore(Path(directory) / ".root-architect" / "state")
+                create_run(store, run_record())
+                record = attempt_record()
+                record[field] = value
+                body = b"task"
+                dispatch = {
+                    "schema_version": 2,
+                    "envelope_id": "env-task-1",
+                    "run_id": record["run_id"],
+                    "task_id": record["task_id"],
+                    "attempt_id": record["attempt_id"],
+                    "kind": "task",
+                    "from": "orchestrator",
+                    "to": "worker:" + record["selected_template"],
+                    "captured_by": "controller:local-1",
+                    "capture_source": "controller",
+                    "reply_to": None,
+                    **{key: record[key] for key in identity_fields},
+                    "body_sha256": hashlib.sha256(body).hexdigest(),
+                    "created_at": "2026-09-20T00:00:00Z",
+                    "provider_thread_id": None,
+                    "provider_turn_id": None,
+                    "provider_event_id": None,
+                }
+                with self.assertRaises(StorageError):
+                    store.reserve_attempt(
+                        record, "ws", "launch-" + field, "parent-1", dispatch, body
+                    )
+
+    def test_capture_requires_exact_persisted_template_provenance(self):
+        changes = {
+            "family": "quality-validator",
+            "selected_template": "impl-executor-strong",
+            "template_catalog_sha256": "b" * 64,
+            "requested_model_tier": "strong",
+            "requested_effort": "high",
+            "resolved_model": "gpt-5.6-sol",
+            "resolved_effort": "high",
+            "effective_model": "gpt-5.6-luna",
+            "effective_effort": "medium",
+        }
+        for field, value in changes.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                store = RuntimeStore(Path(directory) / ".root-architect" / "state")
+                create_run(store, run_record())
+                record = attempt_record()
+                body = b"task"
+                dispatch = {
+                    "schema_version": 2,
+                    "envelope_id": "env-task-1",
+                    "run_id": record["run_id"],
+                    "task_id": record["task_id"],
+                    "attempt_id": record["attempt_id"],
+                    "kind": "task",
+                    "from": "orchestrator",
+                    "to": "worker:" + record["selected_template"],
+                    "captured_by": "controller:local-1",
+                    "capture_source": "controller",
+                    "reply_to": None,
+                    **selected_identity(),
+                    "body_sha256": hashlib.sha256(body).hexdigest(),
+                    "created_at": "2026-09-20T00:00:00Z",
+                    "provider_thread_id": None,
+                    "provider_turn_id": None,
+                    "provider_event_id": None,
+                }
+                store.reserve_attempt(record, "ws", "launch-" + field, "parent-1", dispatch, body)
+                store.begin_launch(record["attempt_id"])
+                store.record_launch_started(record["attempt_id"], "thread-1")
+                report = envelope_record(b"report")
+                report[field] = value
+                report["reply_to"] = "env-task-1"
+                if field == "selected_template":
+                    report["from"] = "worker:" + value
+                with self.assertRaises(StorageError):
+                    store.capture_result(report, b"report", "event-" + field, "captured")
 
     def test_identical_concurrent_delivery_has_one_envelope_and_transition(self):
         queue = multiprocessing.Queue()

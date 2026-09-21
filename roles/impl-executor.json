@@ -18,6 +18,11 @@
       "high"
     ]
   },
+  "variants": [
+    { "id": "impl-executor-cheap", "model": "cheap", "reasoning": "low" },
+    { "id": "impl-executor-mid", "model": "mid", "reasoning": "medium" },
+    { "id": "impl-executor-strong", "model": "strong", "reasoning": "high" }
+  ],
   "tools": {
     "allow": [
       "read-files",

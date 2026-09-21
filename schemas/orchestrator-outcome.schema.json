@@ -4,7 +4,7 @@
   "title": "Orchestrator outcome version 2",
   "description": "A decision backed by immutable runtime record identifiers, never by counts or filenames.",
   "type": "object",
-  "required": ["schema_version", "run_id", "outcome", "rationale"],
+  "required": ["schema_version", "run_id", "outcome", "rationale", "template_selections"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {"type": "integer", "const": 2},
@@ -32,7 +32,31 @@
       }
     },
     "rationale": {"type": "string", "minLength": 1},
+    "template_selections": {
+      "type": "array",
+      "description": "Controller-recorded template identity and settings for the attempts considered in this outcome.",
+      "items": { "$ref": "#/$defs/templateSelection" }
+    },
     "blocked_reason": {"type": "string", "minLength": 1},
     "question_or_failure_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+  },
+  "$defs": {
+    "templateSelection": {
+      "type": "object",
+      "required": ["attempt_id", "family", "selected_template", "template_catalog_sha256", "requested_model_tier", "requested_effort", "resolved_model", "resolved_effort", "effective_model", "effective_effort"],
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {"type": "string", "minLength": 1},
+        "family": {"type": "string", "enum": ["implementer", "spec-validator", "quality-validator"]},
+        "selected_template": {"type": "string", "minLength": 1},
+        "template_catalog_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "requested_model_tier": {"type": "string", "enum": ["cheap", "mid", "strong"]},
+        "requested_effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"]},
+        "resolved_model": {"type": "string", "minLength": 1},
+        "resolved_effort": {"type": ["string", "null"], "enum": ["low", "medium", "high", "xhigh", "max", null]},
+        "effective_model": {"type": ["string", "null"], "minLength": 1},
+        "effective_effort": {"type": ["string", "null"], "enum": ["low", "medium", "high", "xhigh", "max", null]}
+      }
+    }
   }
 }
