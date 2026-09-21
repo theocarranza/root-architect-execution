@@ -65,7 +65,6 @@ def materialize(target, plugin_root=ROOT):
     target = Path(target).expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
     files = render_agents.rendered_agents("codex", str(Path(plugin_root).resolve()))
-    expected = set(files)
     try:
         catalog = json.loads(files["template-catalog.json"])
     except (KeyError, ValueError) as exc:
@@ -73,6 +72,13 @@ def materialize(target, plugin_root=ROOT):
     errors = render_agents.validate_catalog(catalog)
     if errors:
         raise SystemExit("refusing to install invalid template catalog: %s" % "; ".join(errors))
+    expected = {entry["template_id"] + ".toml" for entry in catalog["templates"]}
+    expected.add("template-catalog.json")
+    if set(files) != expected:
+        raise SystemExit(
+            "renderer files do not match the generated template catalog: "
+            "expected %d files, got %d" % (len(expected), len(files))
+        )
     digests = {}
     for name, content in files.items():
         destination = target / name

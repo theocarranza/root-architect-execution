@@ -232,7 +232,11 @@ def check_host(name, roles, problems):
         (p for p in render_agents.both_positions(name, host["bundled_dir"]) if p.is_dir()),
         ROOT / host["bundled_dir"],
     )
-    expected_files = render_agents.rendered_agents(name, host.get("root_placeholder"))
+    try:
+        expected_files = render_agents.rendered_agents(name, host.get("root_placeholder"))
+    except (KeyError, ValueError) as exc:
+        problems.append("%s: cannot render the selected template catalog: %s" % (name, exc))
+        return host
     for filename, expected in expected_files.items():
         target = out_dir / filename
         if not target.exists():

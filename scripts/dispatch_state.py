@@ -254,6 +254,14 @@ def cmd_open(args):
 
 
 def cmd_close(args):
+    # A compatibility CLI call cannot prove who owns the run or whether the
+    # controller has accepted its result. Refuse before reading or changing
+    # state; only an authenticated controller boundary may release the guard.
+    try:
+        runtime_policy.unsupported_direct_mutation()
+    except runtime_policy.AdmissionError as exc:
+        return _fail(str(exc))
+
     directory = state_dir(args.workspace)
     target = directory / ("dispatch-%s.json" % args.run_id)
     if not target.exists():

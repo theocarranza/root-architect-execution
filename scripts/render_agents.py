@@ -79,10 +79,16 @@ def load_roles():
     validator = Validator(SCHEMAS / "agent-role.schema.json")
     roles = []
     for path in sorted((ROOT / "roles").glob("*.json")):
-        role = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            role = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise SystemExit("roles/%s cannot be read as JSON: %s" % (path.name, exc))
+        if not isinstance(role, dict):
+            raise SystemExit("roles/%s must contain a JSON object" % path.name)
         errors = validator.validate(role)
-        if "run-commands" in role.get("tools", {}).get("allow", []):
-            if not role["tools"].get("shell_purpose"):
+        tools = role.get("tools")
+        if isinstance(tools, dict) and "run-commands" in tools.get("allow", []):
+            if not tools.get("shell_purpose"):
                 errors.append(
                     "$.tools.shell_purpose: required when the grant includes run-commands"
                 )

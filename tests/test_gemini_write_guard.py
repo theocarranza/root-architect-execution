@@ -13,7 +13,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent
 SCRIPT_PATH = REPO_ROOT / "adapters" / "gemini" / "hooks" / "root_write_guard.py"
-DISPATCH_STATE = REPO_ROOT / "scripts" / "dispatch_state.py"
 
 
 def valid_brief(**overrides):
@@ -52,25 +51,19 @@ class TestGeminiWriteGuard(unittest.TestCase):
     def open_dispatch(
         self, workspace: Path, brief: dict | None = None, run_id: str = "20260918-task-1"
     ):
-        brief_path = workspace / "brief.json"
-        brief_path.write_text(json.dumps(brief or valid_brief()), encoding="utf-8")
-        proc = subprocess.run(
-            [
-                sys.executable,
-                str(DISPATCH_STATE),
-                "open",
-                "--workspace",
-                str(workspace),
-                "--brief",
-                str(brief_path),
-                "--run-id",
-                run_id,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        """Seed a historic v1 record for guard checks, outside governed admission."""
+        state_dir = workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        dispatch = {
+            "schema_version": 1,
+            "run_id": run_id,
+            "status": "open",
+            "opened_at": "2026-09-21T00:00:00+00:00",
+            "brief": brief or valid_brief(),
+        }
+        (state_dir / ("dispatch-%s.json" % run_id)).write_text(
+            json.dumps(dispatch), encoding="utf-8"
         )
-        self.assertEqual(proc.returncode, 0, f"dispatch_state open failed: {proc.stderr}")
 
     def test_no_dispatch_open_allows_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
