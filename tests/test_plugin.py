@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -3316,7 +3317,65 @@ class PreflightTests(unittest.TestCase):
         return str(path)
 
     def check(self, **kwargs):
-        return root_preflight.run(self.ws, self.RUN, self.observe(**kwargs))
+        return root_preflight.run(
+            self.ws, self.RUN, self.observe(**kwargs), host_name="claude-code"
+        )
+
+    def admission_context(self):
+        return {
+            "run_id": self.RUN,
+            "host_id": "claude-code",
+            "workspace": str(self.workspace.resolve()),
+            "workspace_fingerprint": "workspace-fingerprint",
+            "controller_session_id": "controller-session",
+            "catalog_digest": "catalog-digest",
+            "configuration_fingerprint": "configuration-fingerprint",
+            "capability_evidence": {
+                "source": "selected_transport",
+                "transport_id": "claude-session",
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "capabilities": {
+                    "delegation_available": True,
+                    "controller_selection_enforced": True,
+                    "registered_agents": True,
+                    "hook_registration_enforced": True,
+                },
+            },
+        }
+
+    def test_missing_host_is_refused_without_inventing_a_refusal_record(self):
+        observed = self.observe()
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            root_preflight.run(self.ws, self.RUN, observed)
+        self.assertIn("explicit host", str(caught.exception))
+        self.assertFalse(root_preflight.record_path(self.ws, self.RUN).exists())
+
+    def test_status_can_read_legacy_record_without_a_host_but_never_passes_it(self):
+        path = root_preflight.record_path(self.ws, self.RUN)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"passed": True, "run_id": self.RUN}))
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "root_preflight.py"),
+                "--workspace",
+                self.ws,
+                "--run-id",
+                self.RUN,
+                "--status",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("legacy", result.stderr.lower())
+        self.assertIn("cannot authorize mutation", result.stderr.lower())
+
+    def test_refused_observation_is_not_persisted_as_an_admission_record(self):
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            self.check(agent_types=("ungranted",))
+        self.assertIn("not admitted", str(caught.exception))
+        self.assertFalse(root_preflight.record_path(self.ws, self.RUN).exists())
 
     # --- what it is derived from -------------------------------------------
 
@@ -3327,13 +3386,17 @@ class PreflightTests(unittest.TestCase):
 
     # --- the two questions D11 names ---------------------------------------
 
-    def test_a_sound_session_passes_and_is_recorded(self):
-        record = self.check()
-        self.assertTrue(record["passed"])
-        on_disk = json.loads(root_preflight.record_path(self.ws, self.RUN).read_text())
-        self.assertEqual(
-            on_disk["observed"]["agent_types"], ["root-architect-execution:orchestrator"]
-        )
+    def test_a_sound_observation_cannot_authorize_direct_admission(self):
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            root_preflight.run(
+                self.ws,
+                self.RUN,
+                self.observe(),
+                host_name="claude-code",
+                admission=self.admission_context(),
+            )
+        self.assertIn("unsupported_boundary", str(caught.exception))
+        self.assertFalse(root_preflight.record_path(self.ws, self.RUN).exists())
 
     def test_a_missing_dispatch_tool_is_refused(self):
         """The depth cap, or a launch that was never a main-thread agent."""
@@ -3358,26 +3421,26 @@ class PreflightTests(unittest.TestCase):
             self.check(tools=("Agent", "define_subagent"))
         self.assertIn("root holds 'define_subagent'", str(caught.exception))
 
-    def test_gemini_auto_interrogation_preflight(self):
-        """Gemini runtime auto-interrogation verifies boundary and hooks."""
-        record = root_preflight.run(self.ws, self.RUN, host_name="gemini", auto=True)
-        self.assertTrue(record["passed"])
-        self.assertEqual(record["observed"]["agent_types"], ["orchestrator"])
-        self.assertNotIn("define_subagent", record["observed"]["tools"])
+    def test_gemini_files_cannot_stand_in_for_runtime_evidence(self):
+        """Files cannot prove that the selected transport loaded its guards."""
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            root_preflight.run(self.ws, self.RUN, host_name="gemini", auto=True)
+        self.assertIn("auto-interrogation is unsupported", str(caught.exception))
+        self.assertFalse(root_preflight.record_path(self.ws, self.RUN).exists())
 
-    def test_a_refusal_is_recorded_too(self):
-        """A refused run and an unchecked one must not look the same after."""
+    def test_a_refusal_is_not_written_as_an_admission_record(self):
+        """A diagnostic refusal never creates a record that can gate writes."""
         with self.assertRaises(root_preflight.PreflightError):
             self.check(agent_types=("anything",))
-        record = json.loads(root_preflight.record_path(self.ws, self.RUN).read_text())
-        self.assertFalse(record["passed"])
-        self.assertTrue(record["refusals"])
+        self.assertFalse(root_preflight.record_path(self.ws, self.RUN).exists())
 
     # --- fails closed -------------------------------------------------------
 
     def test_an_absent_observation_is_a_failure_not_a_pass(self):
         with self.assertRaises(root_preflight.PreflightError) as caught:
-            root_preflight.run(self.ws, self.RUN, str(self.workspace / "nope.json"))
+            root_preflight.run(
+                self.ws, self.RUN, str(self.workspace / "nope.json"), host_name="claude-code"
+            )
         self.assertIn("silence is not a pass", str(caught.exception))
 
     def test_a_malformed_observation_is_refused(self):
@@ -3389,7 +3452,12 @@ class PreflightTests(unittest.TestCase):
         ):
             with self.subTest(raw=raw):
                 with self.assertRaises(root_preflight.PreflightError):
-                    root_preflight.run(self.ws, self.RUN, self.observe(raw=raw))
+                    root_preflight.run(
+                        self.ws,
+                        self.RUN,
+                        self.observe(raw=raw),
+                        host_name="claude-code",
+                    )
 
     # --- and what it gates --------------------------------------------------
 
@@ -3398,16 +3466,17 @@ class PreflightTests(unittest.TestCase):
         tasks = [{"name": "t", "worker": "worker:implementer", "brief": "briefs/t.json"}]
         with self.assertRaises(job_queue.JobQueueError) as caught:
             job_queue.init(self.ws, self.RUN, tasks)
-        self.assertIn("no startup check on record", str(caught.exception))
+        self.assertIn("unsupported_boundary", str(caught.exception))
 
         with self.assertRaises(root_preflight.PreflightError):
             self.check(tools=("Read",))
-        with self.assertRaises(job_queue.JobQueueError) as caught:
+        with self.assertRaises(job_queue.JobQueueError):
             job_queue.init(self.ws, self.RUN, tasks)
-        self.assertIn("on record as FAILED", str(caught.exception))
 
-        self.check()
-        self.assertTrue(job_queue.init(self.ws, self.RUN, tasks).exists())
+        with self.assertRaises(root_preflight.PreflightError):
+            self.check()
+        with self.assertRaises(job_queue.JobQueueError):
+            job_queue.init(self.ws, self.RUN, tasks)
 
     def test_an_unreadable_record_proves_nothing(self):
         path = root_preflight.record_path(self.ws, self.RUN)
@@ -3523,7 +3592,7 @@ class PreflightTests(unittest.TestCase):
         # bundle is byte-gated against a fresh build. An install is a copy
         # anyway, so this is also the truer shape of the test.
         bundle = self.workspace / "installed"
-        shutil.copytree(ROOT / "dist/claude-code", bundle)
+        build_adapter.build("claude-code", bundle)
         for script, expected in (
             ("validate_roles.py", "capability gate passed"),
             ("validate_interfaces.py", "interfaces sound"),
@@ -3546,15 +3615,14 @@ class PreflightTests(unittest.TestCase):
                 self.ws,
                 "--run-id",
                 self.RUN,
-                "--observed",
-                self.observe(),
+                "--status",
             ],
             capture_output=True,
             text=True,
             cwd=str(bundle),
         )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("the boundary holds", result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("no startup check on record", result.stderr)
 
     def test_the_cli_refuses_to_invent_an_observation(self):
         result = subprocess.run(
@@ -3565,9 +3633,21 @@ class PreflightTests(unittest.TestCase):
                 self.ws,
                 "--run-id",
                 self.RUN,
+                "--host",
+                "claude-code",
+                "--controller-session-id",
+                "session",
+                "--catalog-digest",
+                "catalog",
+                "--configuration-digest",
+                "configuration",
+                "--workspace-fingerprint",
+                "workspace",
+                "--capability-evidence",
+                str(self.workspace / "evidence.json"),
             ],
             capture_output=True,
             text=True,
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("it cannot make one", result.stderr)
+        self.assertIn("--observed is required", result.stderr)

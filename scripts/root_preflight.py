@@ -362,10 +362,12 @@ def passed(workspace, context_or_run_id):
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return False, "%s will not parse (%s), so it proves nothing" % (path, exc)
-    if record.get("passed") is not True:
+    if not isinstance(record, dict):
+        return False, "%s is not an object, so it proves nothing" % path
+    if record.get("admission_version") != 1 or record.get("passed") is not True:
         return False, (
-            "the startup check for run %s is on record as FAILED: "
-            "%s" % (run_id, "; ".join(record.get("refusals") or ["no reason recorded"]))
+            "the startup record for run %s is legacy or failed and cannot authorize mutation: "
+            "%s" % (run_id, "; ".join(record.get("refusals") or ["no current admission record"]))
         )
     return True, None
 
@@ -418,7 +420,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--host", required=True)
+    parser.add_argument("--host")
     parser.add_argument("--controller-session-id")
     parser.add_argument("--catalog-digest")
     parser.add_argument("--configuration-digest")
