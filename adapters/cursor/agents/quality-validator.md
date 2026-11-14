@@ -56,5 +56,4 @@ You must never: ask-owner, commit, edit-files, handoff-to-peer, spawn-agents, st
 What this host does *not* enforce for you:
 
 - Tool grant is **not enforced** on this host: cursor has no per-agent tool allowlist, so the grant stated above is an instruction only.
-- This host's effort scale is coarser than the manifest's: xhigh is applied as high.
 - Per-agent hooks are unavailable on this host, so the prohibitions stated above rely on session-wide hooks or on the agent's own compliance.

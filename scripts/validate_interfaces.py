@@ -48,6 +48,68 @@ STRENGTH = {
 QUOTE_REQUIRED = {"first-party-doc", "first-party-source"}
 
 
+def can_depend_on_capability(claim):
+    """Whether this claim is strong enough for a generated runtime promise."""
+    return claim.get("availability") == "supported" and claim.get("enforcement") != "unknown"
+
+
+def model_effort_alias_collapse(mapping):
+    """True when portable selections resolve to fewer host values."""
+    values = [value for value in mapping.values() if value is not None]
+    return len(values) != len(set(values))
+
+
+def capability_semantic_errors(claim, name="capability"):
+    """Validate claims that JSON shape alone cannot make honest.
+
+    Evidence from documentation can establish syntax, not a host boundary.
+    Evidence must also describe the exact execution surface being claimed.
+    This deliberately leaves legacy boolean records readable; callers must
+    normalise them and may not promote a negative value to unsupported.
+    """
+    errors = []
+    availability = claim.get("availability")
+    enforcement = claim.get("enforcement")
+    surface = claim.get("execution_surface", "unknown")
+    evidence = claim.get("evidence") or []
+    if availability not in {"supported", "unsupported", "unknown"}:
+        errors.append("%s: availability must be supported, unsupported, or unknown" % name)
+    if enforcement not in {"host", "controller", "instruction", "unknown"}:
+        errors.append("%s: enforcement must name host, controller, instruction, or unknown" % name)
+    if any(item.get("kind") == "contradiction" for item in evidence):
+        errors.append("%s: evidence is contradictory" % name)
+    if enforcement == "host":
+        live = [item for item in evidence if item.get("kind") == "live-observation"]
+        if not live:
+            errors.append("%s: host enforcement requires live-observation evidence" % name)
+        elif not any(item.get("surface") == surface for item in live):
+            errors.append(
+                "%s: host enforcement evidence is for a different execution surface" % name
+            )
+    if name in {"readonly", "read_only_enforced", "mutation_denial"}:
+        if enforcement == "host" and any(
+            item.get("kind") in {"documentation", "sample"} for item in evidence
+        ):
+            # A readonly field in docs or an example establishes neither a
+            # runtime mutation denial nor its reach into a child session.
+            errors.append("%s: readonly documentation/sample cannot prove mutation denial" % name)
+    return errors
+
+
+def check_capability_claims(node, trail, problems):
+    """Walk new-form claims while keeping old interfaces backwards compatible."""
+    if isinstance(node, dict):
+        if "availability" in node or "enforcement" in node:
+            problems.extend(
+                "%s: %s" % (trail, error) for error in capability_semantic_errors(node, trail)
+            )
+        for key, value in node.items():
+            check_capability_claims(value, "%s.%s" % (trail, key), problems)
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            check_capability_claims(value, "%s[%d]" % (trail, index), problems)
+
+
 def interface_paths(host=None):
     if not ADAPTERS.is_dir():
         return []
@@ -323,6 +385,7 @@ def main(argv=None):
             problems.append("%s fails the interface schema: %s" % (path.parent.name, exc))
             continue
         check_provenance_shape(path, document, problems)
+        check_capability_claims(document, "$", problems)
         documents.append((path, document))
 
     roles = render_agents.load_roles()

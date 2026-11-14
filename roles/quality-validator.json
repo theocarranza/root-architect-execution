@@ -14,10 +14,15 @@
   "reasoning": {
     "default": "medium",
     "escalation": [
-      "high",
-      "xhigh"
+      "medium",
+      "high"
     ]
   },
+  "variants": [
+    { "id": "quality-validator-cheap", "model": "cheap", "reasoning": "medium" },
+    { "id": "quality-validator-mid", "model": "mid", "reasoning": "medium" },
+    { "id": "quality-validator-strong", "model": "strong", "reasoning": "high" }
+  ],
   "tools": {
     "allow": [
       "read-files",

@@ -7,6 +7,23 @@
   "required": ["task", "attempt", "max_attempts", "role", "model", "effort", "read_paths", "write_paths", "acceptance", "constraints", "owner_owned_paths", "expected_result"],
   "additionalProperties": false,
   "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [1, 2],
+      "description": "Absent means the historic version 1 brief. Version 2 adds immutable runtime references below."
+    },
+    "run_id": { "type": "string", "minLength": 1 },
+    "task_id": { "type": "string", "minLength": 1 },
+    "attempt_id": { "type": "string", "minLength": 1 },
+    "selected_template": { "type": "string", "minLength": 1 },
+    "template_catalog_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "family": { "type": "string", "enum": ["implementer", "spec-validator", "quality-validator"] },
+    "requested_model_tier": { "type": "string", "enum": ["cheap", "mid", "strong"] },
+    "requested_effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"] },
+    "resolved_model": { "type": "string", "minLength": 1 },
+    "resolved_effort": { "type": ["string", "null"], "enum": ["low", "medium", "high", "xhigh", "max", null] },
+    "effective_model": { "type": ["string", "null"], "minLength": 1 },
+    "effective_effort": { "type": ["string", "null"], "enum": ["low", "medium", "high", "xhigh", "max", null] },
     "task": { "type": "string", "minLength": 1 },
     "attempt": { "type": "integer", "minimum": 1, "maximum": 3 },
     "max_attempts": { "const": 3 },

@@ -119,6 +119,72 @@ class TestGeminiSubagentGuard(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(result.get("decision"), "allow")
 
+    def test_orchestrator_can_spawn_workers(self):
+        for worker_type in ("impl-executor", "spec-validator", "quality-validator"):
+            with self.subTest(worker_type=worker_type):
+                payload = {
+                    "agent_role": "orchestrator",
+                    "toolCall": {
+                        "name": "invoke_subagent",
+                        "args": {
+                            "Subagents": [
+                                {
+                                    "TypeName": worker_type,
+                                    "Prompt": "Do this task",
+                                    "Role": "Worker",
+                                }
+                            ]
+                        },
+                    },
+                }
+                code, result = self.run_guard(payload)
+                self.assertEqual(code, 0)
+                self.assertEqual(result.get("decision"), "allow")
+
+    def test_orchestrator_cannot_spawn_orchestrator(self):
+        payload = {
+            "agent_role": "orchestrator",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [
+                        {
+                            "TypeName": "orchestrator",
+                            "Prompt": "Nested orchestrator",
+                            "Role": "Orchestrator",
+                        }
+                    ]
+                },
+            },
+        }
+        code, result = self.run_guard(payload)
+        self.assertEqual(code, 0)
+        self.assertEqual(result.get("decision"), "deny")
+        self.assertIn("Orchestrator cannot dispatch another orchestrator", result.get("reason", ""))
+
+    def test_worker_cannot_spawn_subagents(self):
+        for worker_role in ("impl-executor", "spec-validator", "quality-validator"):
+            with self.subTest(worker_role=worker_role):
+                payload = {
+                    "agent_role": worker_role,
+                    "toolCall": {
+                        "name": "invoke_subagent",
+                        "args": {
+                            "Subagents": [
+                                {
+                                    "TypeName": "impl-executor",
+                                    "Prompt": "Worker spawning worker",
+                                    "Role": "Worker",
+                                }
+                            ]
+                        },
+                    },
+                }
+                code, result = self.run_guard(payload)
+                self.assertEqual(code, 0)
+                self.assertEqual(result.get("decision"), "deny")
+                self.assertIn("not permitted to call invoke_subagent", result.get("reason", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

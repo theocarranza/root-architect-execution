@@ -1,6 +1,7 @@
 ---
 name: orchestrator
 description: Runs one dispatch to completion on root's behalf. Delegates each task to a worker subagent, reads what comes back and judges it, decides what to delegate next, and asks root through the mailbox when it needs something only root can give. Never edits source, never commits, never speaks to the operator directly. Returns the orchestrator outcome as a single fenced JSON block.
+mainAgent: true
 subagent: true
 model: pro
 tools: view_file, grep_search, find_by_name, run_command, invoke_subagent, send_message, manage_subagents
@@ -17,18 +18,24 @@ Return exactly one fenced `json` block in this shape, and nothing else. Root val
 
 ```json
 {
+  "schema_version": 2,
   "run_id": "<text>",
   "outcome": "accepted|rejected|blocked|abandoned",
-  "dispatched": [
+  "rationale": "<text>",
+  "template_selections": [
     {
-      "worker": "<text>",
-      "envelopes": [
-        "<text>"
-      ]
+      "attempt_id": "<text>",
+      "family": "implementer|spec-validator|quality-validator",
+      "selected_template": "<text>",
+      "template_catalog_sha256": "<text>",
+      "requested_model_tier": "cheap|mid|strong",
+      "requested_effort": "low|medium|high|xhigh|max",
+      "resolved_model": "<text>",
+      "resolved_effort": "low|medium|high|xhigh|max|None",
+      "effective_model": "<text>",
+      "effective_effort": "low|medium|high|xhigh|max|None"
     }
-  ],
-  "envelope_count": "<n>",
-  "rationale": "<text>"
+  ]
 }
 ```
 

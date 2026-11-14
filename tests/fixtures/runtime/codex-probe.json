@@ -1,0 +1,34 @@
+{
+  "host": "codex",
+  "scenario": "capability-probe",
+  "status": "blocked",
+  "live_trial": "not_run",
+  "model_invoked": false,
+  "blocker": {
+    "capability": "max_tokens",
+    "reason": "No verified Codex transport can enforce the requested token limit."
+  },
+  "blockers": [
+    {
+      "capability": "max_seconds",
+      "reason": "No verified Codex transport can enforce the requested time limit."
+    },
+    {
+      "capability": "max_tokens",
+      "reason": "No verified Codex transport can enforce the requested token limit."
+    }
+  ],
+  "limits": {
+    "max_seconds": 300,
+    "max_tokens": 12000,
+    "time_enforcement": "unknown",
+    "token_enforcement": "unknown"
+  },
+  "identities": {
+    "root": "unknown",
+    "orchestrator": "unknown",
+    "worker": "unknown"
+  },
+  "events": "not_run",
+  "observed_events": []
+}

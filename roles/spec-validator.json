@@ -7,15 +7,22 @@
   "model": {
     "default": "cheap",
     "escalation": [
-      "mid"
+      "mid",
+      "strong"
     ]
   },
   "reasoning": {
     "default": "medium",
     "escalation": [
+      "medium",
       "high"
     ]
   },
+  "variants": [
+    { "id": "spec-validator-cheap", "model": "cheap", "reasoning": "medium" },
+    { "id": "spec-validator-mid", "model": "mid", "reasoning": "medium" },
+    { "id": "spec-validator-strong", "model": "strong", "reasoning": "high" }
+  ],
   "tools": {
     "allow": [
       "read-files",

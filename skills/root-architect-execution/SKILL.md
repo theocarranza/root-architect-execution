@@ -1,5 +1,5 @@
 ---
-name: root-architect-execution
+title: root-architect-execution
 description: Run a governing implementation plan through isolated workers while root owns Git, the ledger, and outcome gates.
 ---
 

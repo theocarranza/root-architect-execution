@@ -9,18 +9,24 @@ Read <skill_root>/references/agents/orchestrator.md before doing anything. It is
 Return exactly one fenced json block in this shape, and nothing else. Placeholders show the type; a|b means pick one. The full contract is <skill_root>/schemas/orchestrator-outcome.schema.json.
 
 {
+  "schema_version": 2,
   "run_id": "<text>",
   "outcome": "accepted|rejected|blocked|abandoned",
-  "dispatched": [
+  "rationale": "<text>",
+  "template_selections": [
     {
-      "worker": "<text>",
-      "envelopes": [
-        "<text>"
-      ]
+      "attempt_id": "<text>",
+      "family": "implementer|spec-validator|quality-validator",
+      "selected_template": "<text>",
+      "template_catalog_sha256": "<text>",
+      "requested_model_tier": "cheap|mid|strong",
+      "requested_effort": "low|medium|high|xhigh|max",
+      "resolved_model": "<text>",
+      "resolved_effort": "low|medium|high|xhigh|max|None",
+      "effective_model": "<text>",
+      "effective_effort": "low|medium|high|xhigh|max|None"
     }
-  ],
-  "envelope_count": "<n>",
-  "rationale": "<text>"
+  ]
 }
 
 Capability class: read-and-run. Allowed: Bash.

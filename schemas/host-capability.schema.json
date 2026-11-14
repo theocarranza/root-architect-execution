@@ -32,6 +32,10 @@
       "minLength": 1,
       "description": "Where verified_on's check was made: a documentation URL, or a command whose output was read."
     },
+    "identity": {
+      "$ref": "#/$defs/host_identity",
+      "description": "Product and execution surface to which every capability claim applies. Optional only while legacy manifests are migrated."
+    },
     "agent_dir": {
       "type": "string",
       "description": "Where these agent files belong in a project that consumes this plugin, in that host's own convention."
@@ -153,6 +157,12 @@
             "dispatched_field": {
               "type": ["string", "null"]
             },
+            "dispatched_fields": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "verified": {
               "type": "string",
               "minLength": 1
@@ -228,7 +238,10 @@
   "$defs": {
     "capability": {
       "type": "object",
-      "required": ["supported", "verified"],
+      "anyOf": [
+        {"required": ["supported", "verified"]},
+        {"required": ["availability", "enforcement", "scope", "execution_surface", "evidence"]}
+      ],
       "additionalProperties": false,
       "properties": {
         "supported": {
@@ -242,7 +255,36 @@
           "type": "string",
           "minLength": 1,
           "description": "How this was checked. For an unsupported capability this is the evidence of absence, not an assumption."
+        },
+        "availability": {"type": "string", "enum": ["supported", "unsupported", "unknown"]},
+        "enforcement": {"type": "string", "enum": ["host", "controller", "instruction", "unknown"]},
+        "scope": {"type": ["string", "object", "null"]},
+        "execution_surface": {"type": "string", "enum": ["plugin", "session", "cli", "sdk", "unknown"]},
+        "evidence": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/evidence"}
         }
+      }
+    },
+    "host_identity": {
+      "type": "object",
+      "required": ["product", "execution_surface", "version", "channel"],
+      "additionalProperties": false,
+      "properties": {
+        "product": {"type": "string", "minLength": 1},
+        "execution_surface": {"type": "string", "enum": ["plugin", "session", "cli", "sdk", "unknown"]},
+        "version": {"type": ["string", "null"]},
+        "channel": {"type": ["string", "null"]}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["kind", "reference"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"type": "string", "enum": ["documentation", "source", "sample", "live-observation", "contradiction", "legacy"]},
+        "reference": {"type": "string", "minLength": 1},
+        "surface": {"type": "string", "enum": ["plugin", "session", "cli", "sdk", "unknown"]}
       }
     },
     "enforced_prohibition": {

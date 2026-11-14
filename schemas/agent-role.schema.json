@@ -99,6 +99,20 @@
         }
       }
     },
+    "variants": {
+      "type": "array",
+      "description": "Named, fixed worker templates contained in this logical family declaration. Variants may change only model tier and reasoning effort; permissions remain identical to the family.",
+      "items": {
+        "type": "object",
+        "required": ["id", "model", "reasoning"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*-[a-z]+$" },
+          "model": { "$ref": "#/$defs/modelTier" },
+          "reasoning": { "$ref": "#/$defs/effort" }
+        }
+      }
+    },
     "tools": {
       "type": "object",
       "required": [

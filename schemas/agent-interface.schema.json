@@ -16,6 +16,10 @@
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
       "description": "When this interface was last read from its sources. Per-claim provenance carries its own date; this is the date of the whole sweep."
     },
+    "identity": {
+      "$ref": "#/$defs/host_identity",
+      "description": "The exact product, runtime surface, version, and release channel this interface describes."
+    },
     "definition": {
       "type": "object",
       "required": ["format", "locations", "provenance"],
@@ -42,7 +46,10 @@
     },
     "delegation": {
       "type": "object",
-      "required": ["supported", "nested", "provenance"],
+      "anyOf": [
+        {"required": ["supported", "nested", "provenance"]},
+        {"required": ["availability", "enforcement", "scope", "execution_surface", "evidence"]}
+      ],
       "additionalProperties": false,
       "description": "Whether an agent on this host can dispatch another agent, and whether an agent so dispatched can dispatch in turn. Nested delegation is the capability the orchestrated-worker topology rests on, so it is declared separately from the tool that performs it.",
       "properties": {
@@ -69,18 +76,31 @@
             "provenance": { "$ref": "#/$defs/provenance" }
           }
         },
-        "provenance": { "$ref": "#/$defs/provenance" }
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "availability": {"type": "string", "enum": ["supported", "unsupported", "unknown"]},
+        "enforcement": {"type": "string", "enum": ["host", "controller", "instruction", "unknown"]},
+        "scope": {"type": ["string", "object", "null"]},
+        "execution_surface": {"type": "string", "enum": ["plugin", "session", "cli", "sdk", "unknown"]},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
       }
     },
     "mailbox": {
       "type": "object",
-      "required": ["supported", "provenance"],
+      "anyOf": [
+        {"required": ["supported", "provenance"]},
+        {"required": ["availability", "enforcement", "scope", "execution_surface", "evidence"]}
+      ],
       "additionalProperties": false,
       "description": "Whether the host natively carries messages between running agents. Where false, a portable envelope must supply it; where true, reimplementing one duplicates something the host already does better.",
       "properties": {
         "supported": { "type": "boolean" },
         "mechanism": { "type": ["string", "null"] },
-        "provenance": { "$ref": "#/$defs/provenance" }
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "availability": {"type": "string", "enum": ["supported", "unsupported", "unknown"]},
+        "enforcement": {"type": "string", "enum": ["host", "controller", "instruction", "unknown"]},
+        "scope": {"type": ["string", "object", "null"]},
+        "execution_surface": {"type": "string", "enum": ["plugin", "session", "cli", "sdk", "unknown"]},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
       }
     },
     "notes": {
@@ -92,7 +112,10 @@
   "$defs": {
     "field": {
       "type": "object",
-      "required": ["supported", "provenance"],
+      "anyOf": [
+        {"required": ["supported", "provenance"]},
+        {"required": ["availability", "enforcement", "scope", "execution_surface", "evidence"]}
+      ],
       "additionalProperties": false,
       "properties": {
         "supported": { "type": "boolean" },
@@ -113,7 +136,33 @@
           "type": ["string", "null"],
           "description": "What the key does, in the host's terms. Precedence and interaction with other keys belong here - they are exactly what gets argued about when undeclared."
         },
-        "provenance": { "$ref": "#/$defs/provenance" }
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "availability": {"type": "string", "enum": ["supported", "unsupported", "unknown"]},
+        "enforcement": {"type": "string", "enum": ["host", "controller", "instruction", "unknown"]},
+        "scope": {"type": ["string", "object", "null"]},
+        "execution_surface": {"type": "string", "enum": ["plugin", "session", "cli", "sdk", "unknown"]},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
+      }
+    },
+    "host_identity": {
+      "type": "object",
+      "required": ["product", "execution_surface", "version", "channel"],
+      "additionalProperties": false,
+      "properties": {
+        "product": {"type": "string", "minLength": 1},
+        "execution_surface": {"type": "string", "enum": ["plugin", "session", "cli", "sdk", "unknown"]},
+        "version": {"type": ["string", "null"]},
+        "channel": {"type": ["string", "null"]}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["kind", "reference"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"type": "string", "enum": ["documentation", "source", "sample", "live-observation", "contradiction", "legacy"]},
+        "reference": {"type": "string", "minLength": 1},
+        "surface": {"type": "string", "enum": ["plugin", "session", "cli", "sdk", "unknown"]}
       }
     },
     "provenance": {

@@ -26,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from jsonschema_mini import SchemaError, Validator  # noqa: E402
+import runtime_policy  # noqa: E402
 
 SCHEMAS = Path(__file__).resolve().parent.parent / "schemas"
 STATE_SUBDIR = Path(".root-architect") / "state"
@@ -169,7 +170,30 @@ def _fail(message):
     return 1
 
 
+def _admission_from_args(args):
+    try:
+        evidence = json.loads(Path(args.capability_evidence).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise runtime_policy.AdmissionError(
+            "admission blocked: cannot read selected transport capability evidence (%s)" % exc
+        )
+    return {
+        "run_id": args.run_id,
+        "host_id": args.host,
+        "workspace": str(Path(args.workspace).resolve()),
+        "workspace_fingerprint": args.workspace_fingerprint,
+        "controller_session_id": args.controller_session_id,
+        "catalog_digest": args.catalog_digest,
+        "configuration_fingerprint": args.configuration_digest,
+        "capability_evidence": evidence,
+    }
+
+
 def cmd_open(args):
+    try:
+        runtime_policy.unsupported_direct_mutation(_admission_from_args(args))
+    except runtime_policy.AdmissionError as exc:
+        return _fail(str(exc))
     # The last un-wrapped read in this script. Every other entry point turns a
     # bad file into "blocked: ..."; a traceback here is still a refusal to
     # open, but it does not say which of the two files was at fault.
@@ -230,6 +254,14 @@ def cmd_open(args):
 
 
 def cmd_close(args):
+    # A compatibility CLI call cannot prove who owns the run or whether the
+    # controller has accepted its result. Refuse before reading or changing
+    # state; only an authenticated controller boundary may release the guard.
+    try:
+        runtime_policy.unsupported_direct_mutation()
+    except runtime_policy.AdmissionError as exc:
+        return _fail(str(exc))
+
     directory = state_dir(args.workspace)
     target = directory / ("dispatch-%s.json" % args.run_id)
     if not target.exists():
@@ -352,6 +384,12 @@ def main(argv=None):
     p_open.add_argument("--workspace", default=".")
     p_open.add_argument("--brief", required=True)
     p_open.add_argument("--run-id", required=True)
+    p_open.add_argument("--host", required=True)
+    p_open.add_argument("--workspace-fingerprint", required=True)
+    p_open.add_argument("--controller-session-id", required=True)
+    p_open.add_argument("--catalog-digest", required=True)
+    p_open.add_argument("--configuration-digest", required=True)
+    p_open.add_argument("--capability-evidence", required=True)
     p_open.set_defaults(func=cmd_open)
 
     p_close = sub.add_parser("close", help="close or abort the open dispatch")

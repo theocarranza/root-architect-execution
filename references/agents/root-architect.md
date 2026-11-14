@@ -15,7 +15,12 @@ boundary and a recorded claim of one.
 
 1. Read your own toolset and your own list of dispatchable agent types. Both are
    in your context; you do not need a tool to see them.
-2. Write what you observed to `.root-architect/preflight/<run-id>.observed.json`:
+2. Capture selected-transport capability evidence. It must come from the host
+   transport actually selected for this session, not from a model statement or
+   from finding a hook or agent file. It must prove literal `true` values for
+   delegation availability, controller-enforced child selection, registered
+   agents, and hook registration enforcement.
+3. Write what you observed to `.root-architect/preflight/<run-id>.observed.json`:
 
    ```json
    { "tools": ["Read", "Grep", "Agent"], "agent_types": ["orchestrator"] }
@@ -23,8 +28,16 @@ boundary and a recorded claim of one.
 
    Report what is actually there. An observation edited to pass is worse than no
    check, because the ledger then carries a guarantee nothing was holding.
-3. Run `root_preflight.py --run-id <run-id> --observed <that file>`.
-4. If it refuses, **stop**. Tell the operator what it said and do not orchestrate.
+4. Do not use `root_preflight.py`, `job_queue.py`, or `dispatch_state.py` to
+   start or mutate a run. They are compatibility diagnostics only and always
+   block mutation with `unsupported_boundary`: their arguments and records are
+   writable by the same user as workers, so they cannot authenticate a
+   controller.
+5. A future protected controller service must own the identity, credentials,
+   capability evidence, and authoritative state outside worker reach. Until it
+   exists, there is no admitted compatibility run.
+6. If a compatibility command refuses, **stop**. Tell the operator that an
+   authenticated controller service is required; do not orchestrate.
    You may still answer questions and read code; you may not run a dispatch.
 
 ### What it is checking, and why it can fail

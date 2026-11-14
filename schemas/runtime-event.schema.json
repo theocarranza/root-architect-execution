@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://root-architect-execution/schemas/runtime-event.schema.json",
+  "title": "Runtime event version 2",
+  "type": "object",
+  "required": ["schema_version", "event_id", "run_id", "task_id", "attempt_id", "kind", "source", "provider_event_id", "provider_observed_at", "local_recorded_at"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 2 },
+    "event_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "task_id": { "type": ["string", "null"] },
+    "attempt_id": { "type": ["string", "null"] },
+    "kind": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "enum": ["provider", "controller"] },
+    "provider_event_id": { "type": ["string", "null"] },
+    "provider_observed_at": { "type": ["string", "null"] },
+    "local_recorded_at": { "type": "string", "minLength": 1 }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://root-architect-execution/schemas/template-catalog.schema.json",
+  "title": "Generated host template catalog",
+  "type": "object",
+  "required": ["schema_version", "host", "templates", "catalog_sha256"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "host": { "type": "string", "minLength": 1 },
+    "catalog_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "templates": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/template" }
+    }
+  },
+  "$defs": {
+    "settings": {
+      "type": "object",
+      "required": ["model_tier", "effort"],
+      "additionalProperties": false,
+      "properties": {
+        "model_tier": { "type": "string", "enum": ["cheap", "mid", "strong"] },
+        "effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"] }
+      }
+    },
+    "template": {
+      "type": "object",
+      "required": ["template_id", "family", "requested", "resolved", "permissions", "alias_of", "collapsed_model_tier", "collapsed_effort_tier", "collapsed_from_previous"],
+      "additionalProperties": false,
+      "properties": {
+        "template_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "family": { "type": "string", "minLength": 1 },
+        "requested": { "$ref": "#/$defs/settings" },
+        "resolved": {
+          "type": "object",
+          "required": ["model", "effort"],
+          "additionalProperties": false,
+          "properties": {
+            "model": { "type": "string", "minLength": 1 },
+            "effort": { "type": ["string", "null"], "enum": ["low", "medium", "high", "xhigh", "max", null] }
+          }
+        },
+        "permissions": { "type": "object" },
+        "alias_of": { "type": ["string", "null"] },
+        "collapsed_model_tier": { "type": "boolean" },
+        "collapsed_effort_tier": { "type": "boolean" },
+        "collapsed_from_previous": { "type": "boolean" }
+      }
+    }
+  }
+}

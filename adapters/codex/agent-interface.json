@@ -17,6 +17,19 @@
     }
   },
   "fields": {
+    "acceptance_runtime_probe": {
+      "availability": "unknown",
+      "enforcement": "unknown",
+      "scope": "No live Codex transport was exercised; a token cap cannot yet be enforced.",
+      "execution_surface": "unknown",
+      "evidence": [
+        {
+          "kind": "sample",
+          "reference": "tests/fixtures/runtime/codex-probe.json",
+          "surface": "unknown"
+        }
+      ]
+    },
     "description": {
       "supported": true,
       "type": "string",

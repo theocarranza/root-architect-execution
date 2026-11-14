@@ -1,54 +1,45 @@
 #!/usr/bin/env python3
-"""PreToolUse guard: root must not write product code while a dispatch is open.
+"""PreToolUse guard: root must not write product code or bypass the orchestrator.
 
-"Root writing product code" is the first red flag this skill lists, and it is
-the one that reads as helpfulness in the moment — the worker stalled, the file
-is small, root can just do it. That is a failed delegation with the evidence
-trail deleted: no RED count, no diff for the validators, no attempt recorded.
+Root owns the plan, Git, and the ledger. Workers write product code.
+When a dispatch is open under <cwd>/.root-architect/state/, this guard
+intercepts Edit, Write, MultiEdit, NotebookEdit, Bash, and Agent calls.
 
-The guard is narrow on purpose. It blocks an Edit/Write/NotebookEdit only when
-all of these hold:
+Fails closed on corrupted or unreadable dispatch state.
 
-  * the call comes from the root session, not a subagent (the PreToolUse
-    payload carries agent_type only inside a subagent);
-  * a dispatch is open under <cwd>/.root-architect/state/;
-  * the target path resolves inside that dispatch's write_paths.
+Three layered guards (in evaluation order):
 
-Everything else passes through: the ledger, the plan, the state directory, any
-path the open dispatch does not own, and every edit made while no dispatch is
-open. Root is not locked out of its own repository — it is stopped from
-overwriting the exact work it has delegated and is waiting on.
+  Guard 1 — State self-close & direct edit block
+    Root must never self-close a dispatch or mutate dispatch state files under
+    .root-architect/state/. Only the orchestrator drives
+    ``scripts/dispatch_state.py close`` after validating worker returns.
 
-Exit 2 blocks the call and shows the reason to the model. On Codex, canonical
-apply_patch is intentionally outside this guard: Codex does not document
-worker identity in PreToolUse, so blocking it would also block the worker.
-Codex relies on the instructional boundary and root diff review. Dispatch state that
-exists but cannot be trusted (unparseable, schema-invalid, or unreadable
-because dispatch_state itself could not be imported) is also treated as a
-block: this guard fails closed, never open, whenever it cannot prove no
-delegation is open.
+  Guard 2 — Global product-code write block (lib/, functions/)
+    Root must never write product code directly. Files under lib/** or
+    functions/** are protected: writes from root are denied unconditionally,
+    regardless of whether a dispatch is open. Product implementation must be
+    delegated via the orchestrator to a worker dispatch.
+
+  Guard 3 — Worker identity & subagent spawning
+    Only the orchestrator may spawn workers (impl-executor, spec-validator,
+    quality-validator). Root may only spawn 'orchestrator'. Workers cannot
+    spawn subagents. Only worker roles are permitted to write product code.
+
+Exit 2 blocks the call and shows the reason to the model.
 """
+
+from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import NoReturn
 
 HERE = Path(__file__).resolve().parent
 
-# Two named positions, in order, and deliberately not a search.
-#
-#   <plugin root>/hooks/          -> <plugin root>/scripts/      (installed)
-#   adapters/<host>/hooks/        -> <repo root>/scripts/        (in the repo)
-#
-# The first is where this file actually runs. The second exists because ADR
-# 0001 step 3 moved the hooks into the adapter that ships them, and the guard
-# is still run in place here - by its own tests, and by anyone reproducing a
-# denial. Walking upward for the first `scripts/` found would also work and is
-# worse: this guard fails CLOSED on an import error, so a directory that
-# happens to be named scripts/ would not produce a clean failure, it would
-# produce a guard that blocks every write with a confusing reason.
+# Support loading dispatch_state from both development tree and installed plugin
 for _candidate in (HERE.parent / "scripts", HERE.parent.parent.parent / "scripts"):
     if (_candidate / "dispatch_state.py").is_file():
         sys.path.insert(0, str(_candidate))
@@ -57,14 +48,28 @@ for _candidate in (HERE.parent / "scripts", HERE.parent.parent.parent / "scripts
 WRITE_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
 PATH_KEYS = ("file_path", "notebook_path", "path")
 
+# Product-code directories root must never write directly
+_PROTECTED_FIRST_SEGMENTS = frozenset({"lib", "functions"})
+
+WORKER_ROLES = frozenset({"impl-executor", "implementer", "worker"})
+VALIDATOR_ROLES = frozenset({"spec-validator", "quality-validator", "validator"})
+ALL_WORKER_ROLES = WORKER_ROLES | VALIDATOR_ROLES
+
+_STATE_MUTATION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"dispatch_state\.py\b.*\bclose\b"),
+    re.compile(r"dispatch_state\.py\b.*\baborted\b"),
+    re.compile(r"python3?\s+-c\b.*\.root-architect[\\/]?state"),
+    re.compile(r"(?:>|>>|tee\s)\s*\.root-architect[\\/]state[\\/]dispatch-"),
+    re.compile(r"\brm\b.*\.root-architect[\\/]state[\\/]dispatch-"),
+    re.compile(r"\bjq\b.*dispatch-.*\.json"),
+    re.compile(r"\bsed\b.*-i\b.*dispatch-.*\.json"),
+    re.compile(r"json\.dump\b.*dispatch-"),
+    re.compile(r"open\(['\"].+\.root-architect[\\/]state[\\/]"),
+]
+
 
 def _usable_path(value):
-    """A value is usable as a path only if it is a non-empty, null-free str.
-
-    Every other shape raises out of Path() or a "/" join — TypeError for a
-    non-string, ValueError for an embedded null byte. Callers treat a None
-    return as malformed hook input and allow the call through.
-    """
+    """A value is usable as a path only if it is a non-empty, null-free str."""
     if not isinstance(value, str) or not value or "\x00" in value:
         return None
     return value
@@ -75,12 +80,6 @@ def _allow() -> NoReturn:
 
 
 def _report(stream, text):
-    """Best-effort write. A stream that cannot take the text is not an error.
-
-    Reporting is how a denial explains itself; it is not how a denial takes
-    effect. Only the exit code blocks the call, so a broken pipe or a full
-    device must never be allowed to propagate out of here.
-    """
     try:
         stream.write(text)
         stream.flush()
@@ -89,21 +88,6 @@ def _report(stream, text):
 
 
 def _deny(reason: str) -> NoReturn:
-    """Unconditionally terminal: exit 2 whatever the streams do.
-
-    Two ways this used to fail open. (1) An OSError from the payload write
-    escaped into a caller's except clause, which then allowed the call, or
-    reached main()'s safety net, which called _deny() again on the same
-    broken stream and let the second exception escape as exit 1. (2) Even
-    with the exception contained, sys.exit(2) still runs the interpreter's
-    shutdown flush, and a failing flush there makes Python report 120 no
-    matter what this function decided.
-
-    So: write and flush both streams under their own handling, then leave
-    via os._exit, which cannot be re-entered and runs no shutdown flush.
-    Both streams are already flushed above, so nothing reportable is lost.
-    Only exit 2 blocks a call; 0, 1 and 120 are all fail-open.
-    """
     _report(
         sys.stdout,
         json.dumps(
@@ -121,43 +105,102 @@ def _deny(reason: str) -> NoReturn:
     os._exit(2)
 
 
-def _resolve_owned(root, write_paths):
-    """Resolve each write_path independently, skipping entries that raise.
+def get_caller_role(payload: dict) -> str:
+    """Extract caller identity from agent_type payload field or environment. Defaults to 'root'."""
+    agent_type = payload.get("agent_type")
+    if agent_type and isinstance(agent_type, str):
+        if ":" in agent_type:
+            agent_type = agent_type.split(":")[-1]
+        return agent_type.strip().lower()
+    env_role = os.environ.get("AGENT_ROLE", "").strip().lower()
+    return env_role if env_role else "root"
 
-    Returns a list of resolved Path objects. An entry that raises OSError or
-    ValueError during resolution is skipped, and remaining entries are still
-    resolved and returned. This isolation ensures one unresolvable path does
-    not prevent checking the others.
-    """
+
+def _is_protected_product_path(target: Path, root: Path) -> bool:
+    try:
+        rel = target.relative_to(root)
+    except ValueError:
+        return False
+    return bool(rel.parts) and rel.parts[0] in _PROTECTED_FIRST_SEGMENTS
+
+
+def _is_state_path(target: Path, root: Path) -> bool:
+    try:
+        rel = target.relative_to(root)
+    except ValueError:
+        return False
+    return len(rel.parts) >= 2 and rel.parts[0] == ".root-architect" and rel.parts[1] == "state"
+
+
+def _resolve_owned(root, write_paths):
     owned_paths = []
     for owned in write_paths:
         try:
             owned_paths.append((root / owned).resolve())
         except (OSError, ValueError, RuntimeError):
-            # RuntimeError is what pathlib.Path.resolve() raises for a
-            # symlink loop up to 3.12 ("Symlink loop from ..."). It is
-            # neither OSError nor ValueError, so it must be listed
-            # explicitly or a looping entry crashes the whole hook.
-            #
-            # From 3.13 resolve() follows os.path.realpath(strict=False)
-            # and returns the path unchanged rather than raising, so a
-            # looping entry no longer reaches this handler at all. It stays
-            # in owned_paths and the path the dispatch declared keeps its
-            # protection, which is the safer of the two behaviours. The
-            # catch stays for 3.12 and earlier, where the entry is dropped.
             continue
     return owned_paths
 
 
-def main():
-    """Top-level safety net: any unexpected exception denies, never crashes.
+_POSIX_MUTATION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\b(?:sed\s+.*(?:-i|--in-place))\b.*(?:\b|/)(?:lib|functions)/"),
+    re.compile(r"\b(?:cp|mv|rm|touch|truncate|patch|install|dd)\b.*(?:\b|/)(?:lib|functions)/"),
+]
 
-    _allow() and _deny() communicate via SystemExit, which this must not
-    swallow. Anything else escaping _main() is unproven, untrusted state by
-    the guard's own contract, so it is treated the same as unreadable
-    dispatch state: deny with exit 2, never let an internal error fall
-    through to a bare exit 1 (which PreToolUse treats as non-blocking).
-    """
+_INTERPRETER_MUTATION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(?:python3?|node|ruby|perl|bash|sh|zsh)\s+.*-c\s+.*(?:\b|/)(?:lib|functions)/"),
+    re.compile(r"(?:python3?|node|ruby|perl|bash|sh|zsh)\s+.*-e\s+.*(?:\b|/)(?:lib|functions)/"),
+    re.compile(r"(?:python3?|bash|sh|zsh)\s+\S+\.(?:py|sh)\b.*(?:\b|/)(?:lib|functions)/"),
+    re.compile(r"open\s*\(\s*['\"][^'\"]*(?:lib|functions)/"),
+    re.compile(r"open\s*\([^)]*['\"][wa+]"),
+    re.compile(r"(?:writeFileSync|createWriteStream)\s*\(\s*['\"][^'\"]*(?:lib|functions)/"),
+    re.compile(r"Path\s*\(\s*['\"][^'\"]*(?:lib|functions)/[^'\"]*['\"]\s*\)\.write_"),
+]
+
+HARD_STOP_PRODUCT_DENIAL = (
+    "Root write guard [Guard 2 — product-code write block]:\n"
+    "DENIED: Root attempted to modify protected product code in a protected product directory.\n\n"
+    "Root Architect mode is active.\n\n"
+    "Do not retry this operation using:\n"
+    "- Bash / run_command\n"
+    "- Python\n"
+    "- shell scripts\n"
+    "- sed\n"
+    "- interpreters\n"
+    "- alternate file tools\n"
+    "- indirect subprocesses\n\n"
+    "Required action:\n"
+    "1. Dispatch `orchestrator` through the approved subagent mechanism.\n"
+    "2. If `orchestrator` is unavailable, mark the session BLOCKED and stop implementation.\n\n"
+    "This denial represents an architectural boundary, not a tool limitation."
+)
+
+
+def _check_shell_product_write(cmd: str) -> str | None:
+    """Detect shell redirection, file utility mutation, or interpreter execution targeting protected product code."""
+    for seg in _PROTECTED_FIRST_SEGMENTS:
+        pattern = rf"(?:>|>>|\btee\b\s+(?:-a\s+)?)(?:[^\w\s/.-]*\s*)?(?:{seg}/|[^\w\s/.-]*\b{seg}/)"
+        if re.search(pattern, cmd):
+            return seg
+
+    for pattern in _POSIX_MUTATION_PATTERNS:
+        if pattern.search(cmd):
+            for seg in _PROTECTED_FIRST_SEGMENTS:
+                if f"{seg}/" in cmd:
+                    return seg
+            return "lib"
+
+    for pattern in _INTERPRETER_MUTATION_PATTERNS:
+        if pattern.search(cmd):
+            for seg in _PROTECTED_FIRST_SEGMENTS:
+                if f"{seg}/" in cmd:
+                    return seg
+            return "lib"
+
+    return None
+
+
+def main():
     try:
         _main()
     except SystemExit:
@@ -174,21 +217,16 @@ def _main():
     try:
         payload = json.load(sys.stdin)
     except ValueError:
-        # A guard that cannot read its input must not block real work.
         _allow()
 
     if not isinstance(payload, dict):
-        # Not a JSON object: cannot read tool_name from it. Not real work.
         _allow()
 
-    if not isinstance(payload.get("tool_name"), str):
-        # A list or dict tool_name is unhashable and cannot even be tested
-        # for membership. Malformed hook input, not real work.
+    tool_name = payload.get("tool_name")
+    if not isinstance(tool_name, str):
         _allow()
-    if payload["tool_name"] not in WRITE_TOOLS:
-        _allow()
-    if payload.get("agent_type"):
-        # Inside a worker. Its own grant governs; this guard is about root.
+
+    if tool_name not in WRITE_TOOLS and tool_name not in ("Bash", "Agent"):
         _allow()
 
     cwd = payload.get("cwd")
@@ -197,22 +235,110 @@ def _main():
     else:
         usable = _usable_path(cwd)
         if usable is None:
-            # cwd is not a path we can build on. Malformed hook input.
             _allow()
         workspace = usable
 
+    root = Path(workspace).resolve()
+    caller_role = get_caller_role(payload)
+    tool_input = payload.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        _allow()
+
+    # ------------------------------------------------------------------
+    # GUARD 3: Subagent spawning restrictions (Agent tool)
+    # ------------------------------------------------------------------
+    if tool_name == "Agent":
+        target_type = (
+            tool_input.get("agent_type")
+            or tool_input.get("subagent_type")
+            or tool_input.get("type")
+            or tool_input.get("name", "")
+        )
+        if isinstance(target_type, str) and ":" in target_type:
+            target_type = target_type.split(":")[-1]
+        target_type = target_type.strip().lower() if isinstance(target_type, str) else ""
+
+        if caller_role in ALL_WORKER_ROLES:
+            _deny("Worker write guard: workers are not permitted to dispatch subagents.")
+
+        if caller_role == "orchestrator":
+            if target_type == "orchestrator":
+                _deny(
+                    "Orchestrator write guard: orchestrator cannot dispatch another orchestrator."
+                )
+            if target_type not in ALL_WORKER_ROLES and target_type != "":
+                _deny(
+                    f"Orchestrator may only dispatch worker subagents ({sorted(ALL_WORKER_ROLES)}), "
+                    f"attempted: '{target_type}'."
+                )
+            _allow()
+
+        # Root: can only dispatch orchestrator
+        if target_type != "orchestrator":
+            _deny(
+                f"Root write guard [subagent boundary]: root is strictly restricted to dispatching "
+                f"'orchestrator' (roles/root-architect.json delegates_to: ['orchestrator']). "
+                f"Only the orchestrator can spawn workers. Attempted to dispatch '{target_type}'. "
+                f"Root must not bypass the orchestrator layer or invoke workers directly."
+            )
+        _allow()
+
+    # ------------------------------------------------------------------
+    # GUARD 1 & 2: Shell commands (Bash) mutating state or product code
+    # ------------------------------------------------------------------
+    if tool_name == "Bash":
+        cmd = tool_input.get("command", "")
+        if isinstance(cmd, str) and cmd:
+            if caller_role in ("root", "orchestrator"):
+                for pattern in _STATE_MUTATION_PATTERNS:
+                    if pattern.search(cmd):
+                        _deny(
+                            "Root write guard [Guard 1 — state self-close]: command line appears to "
+                            "mutate a dispatch state file (.root-architect/state/dispatch-*.json). "
+                            "Dispatch lifecycle is managed exclusively by the orchestrator after "
+                            "validating the worker's return via `scripts/dispatch_state.py close`. "
+                            "Root must not self-close a dispatch."
+                        )
+                hit_seg = _check_shell_product_write(cmd)
+                if hit_seg:
+                    _deny(HARD_STOP_PRODUCT_DENIAL)
+        _allow()
+
+    # ------------------------------------------------------------------
+    # GUARD 1 & 2: Direct file writes (Edit, Write, NotebookEdit, MultiEdit)
+    # ------------------------------------------------------------------
+    raw_paths = [tool_input[k] for k in PATH_KEYS if tool_input.get(k)]
+    if not raw_paths:
+        _allow()
+
+    for raw in raw_paths:
+        raw = _usable_path(raw)
+        if raw is None:
+            continue
+        try:
+            target = (root / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
+        except (OSError, ValueError, RuntimeError):
+            continue
+
+        # State directory protection: root must never edit dispatch state files directly
+        if _is_state_path(target, root) and caller_role == "root":
+            _deny(
+                "Root write guard [Guard 1 — state edit block]: root must not directly edit "
+                "or overwrite dispatch state files under .root-architect/state/."
+            )
+
+        # Product code protection: root must never edit product code directly
+        if _is_protected_product_path(target, root) and caller_role not in WORKER_ROLES:
+            _deny(HARD_STOP_PRODUCT_DENIAL)
+
+    # ------------------------------------------------------------------
+    # DISPATCH STATE VERIFICATION & WRITE-PATH CHECK
+    # ------------------------------------------------------------------
     try:
-        from dispatch_state import active_dispatch, DispatchStateError
+        from dispatch_state import DispatchStateError, active_dispatch
     except ImportError:
-        # Cannot verify dispatch state without the module. Do not trust that
-        # no dispatch is open just because we cannot check: look for state
-        # files directly, with no import needed.
         directory = Path(workspace) / ".root-architect" / "state"
         if directory.is_dir():
-            # glob() would swallow the PermissionError from an unreadable
-            # directory and yield nothing, which reads exactly like "no state
-            # files". List explicitly so a failure to look is never mistaken
-            # for proof that nothing is there.
             try:
                 names = os.listdir(directory)
             except OSError as e:
@@ -255,21 +381,8 @@ def _main():
     if not dispatch:
         _allow()
 
-    tool_input = payload.get("tool_input") or {}
-    if not isinstance(tool_input, dict):
-        # Malformed hook input, not malformed state. Do not block real work.
-        _allow()
-    raw_paths = [tool_input[k] for k in PATH_KEYS if tool_input.get(k)]
-    if not raw_paths:
-        _allow()
-
     brief = dispatch["brief"]
-    # The try below covers resolution only. It must never span the ownership
-    # comparison or the _deny() call: an OSError raised while *reporting* a
-    # proven denial would otherwise be caught here and turned into _allow(),
-    # exiting 0 and letting the delegated write through.
     try:
-        root = Path(workspace).resolve()
         owned_paths = _resolve_owned(root, brief.get("write_paths", []))
     except (OSError, ValueError, RuntimeError):
         _allow()
@@ -283,6 +396,9 @@ def _main():
         except (OSError, ValueError, RuntimeError):
             continue
         if any(target == owned or owned in target.parents for owned in owned_paths):
+            if caller_role in WORKER_ROLES:
+                _allow()
+
             _deny(
                 "Root write guard: %s is a write path of open dispatch %s "
                 "(task %r, attempt %d of %d, worker %s).\n"

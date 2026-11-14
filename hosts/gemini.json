@@ -57,7 +57,8 @@
       "field": "subagent",
       "main_thread_field": "mainAgent",
       "dispatched_field": "subagent",
-      "verified": "Antigravity/Gemini agent frontmatter supports mainAgent: true for top-level agents and subagent: true for subagents."
+      "dispatched_fields": ["mainAgent", "subagent"],
+      "verified": "Antigravity/Gemini agent frontmatter requires mainAgent: true and subagent: true for subagents to be discoverable and invocable in the session subagent roster."
     }
   },
   "main_thread": {

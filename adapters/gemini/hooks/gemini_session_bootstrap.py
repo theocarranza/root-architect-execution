@@ -82,19 +82,15 @@ def main() -> int:
         if not raw_input.strip():
             json.dump({"injectSteps": []}, sys.stdout)
             return 0
-        data = json.loads(raw_input)
+        json.loads(raw_input)
     except Exception:
         json.dump({"injectSteps": []}, sys.stdout)
         return 0
 
-    invocation_num = data.get("invocationNum", 1)
-
-    # The root architect protocol is enforced unconditionally at session start (invocationNum == 1).
-    # It is NOT conditional, NOT optional.
-    if invocation_num == 1:
-        output = {"injectSteps": [{"ephemeralMessage": BOOTSTRAP_PROMPT}]}
-    else:
-        output = {"injectSteps": []}
+    # The root architect protocol is enforced persistently on every turn.
+    # It is NOT conditional, NOT optional. Context summarization must never strip
+    # the governing operational directives and preflight gate reminder.
+    output = {"injectSteps": [{"ephemeralMessage": BOOTSTRAP_PROMPT}]}
 
     json.dump(output, sys.stdout)
     sys.stdout.write("\n")

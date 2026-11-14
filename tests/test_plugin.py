@@ -8,6 +8,7 @@ suite — the mini validator is checked through the contracts that use it.
 """
 
 import contextlib
+import importlib.util
 import json
 import os
 import shutil
@@ -15,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,9 +36,14 @@ sys.path.insert(0, str(SCRIPTS))
 # by path rather than imported off sys.path. Putting adapters/codex/ on the
 # path would also make every other host's mechanics importable by bare name,
 # which is the coupling the adapter directories exist to prevent.
-import importlib.util  # noqa: E402
+import mailbox  # noqa: E402
 
+import build_adapter  # noqa: E402
+import job_queue  # noqa: E402
 import render_agents  # noqa: E402
+import root_preflight  # noqa: E402
+import smoke_install  # noqa: E402
+import validate_interfaces  # noqa: E402
 from dispatch_state import DispatchStateError  # noqa: E402
 from jsonschema_mini import Validator  # noqa: E402
 
@@ -45,13 +52,6 @@ _spec = importlib.util.spec_from_file_location(
 )
 install_codex = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(install_codex)
-import mailbox  # noqa: E402
-
-import build_adapter  # noqa: E402
-import job_queue  # noqa: E402
-import root_preflight  # noqa: E402
-import smoke_install  # noqa: E402
-import validate_interfaces  # noqa: E402
 
 
 def setUpModule():
@@ -195,7 +195,7 @@ class MiniValidatorTests(unittest.TestCase):
                 )
                 self.assertTrue(
                     any("pattern" in e for e in errors),
-                    f"Schema should reject control char {repr(control_char)}",
+                    f"Schema should reject control char {control_char!r}",
                 )
 
     def test_rejects_control_characters_in_read_paths(self):
@@ -208,7 +208,7 @@ class MiniValidatorTests(unittest.TestCase):
                 )
                 self.assertTrue(
                     any("pattern" in e for e in errors),
-                    f"Schema should reject control char {repr(control_char)}",
+                    f"Schema should reject control char {control_char!r}",
                 )
 
     def test_anyof_accepts_both_effort_forms(self):
@@ -396,12 +396,11 @@ class RenderTests(unittest.TestCase):
                         payload, encoding="utf-8"
                     )
                     _, names = install_codex.materialize(target, ROOT)
-                    expected = sum(
-                        1
-                        for _, role in render_agents.load_roles()
-                        if render_agents.role_targets_host(role, "codex")[0]
-                    )
-                    self.assertEqual(len(names), expected)
+                    catalog = json.loads((target / "template-catalog.json").read_text())
+                    expected_agents = {
+                        entry["template_id"] + ".toml" for entry in catalog["templates"]
+                    }
+                    self.assertEqual(set(names), expected_agents | {"template-catalog.json"})
 
     def test_codex_install_still_removes_a_file_it_owns(self):
         """The hardening must not turn the cleanup into a no-op."""
@@ -702,6 +701,10 @@ class RenderTests(unittest.TestCase):
 
     def test_generated_agents_state_the_enforcement_on_disk(self):
         """Guards the committed artifacts, not the code path above."""
+        roles_by_name = {}
+        for _filename, role in render_agents.load_roles():
+            roles_by_name[role["id"]] = role
+            roles_by_name.update((variant["id"], role) for variant in role.get("variants", []))
         for path in sorted(CLAUDE_AGENTS.glob("*.md")):
             with self.subTest(agent=path.stem):
                 text = path.read_text(encoding="utf-8")
@@ -709,7 +712,8 @@ class RenderTests(unittest.TestCase):
                 # Derived per role rather than a fixed pair: spawn-agents is
                 # enforced only where the role holds no delegation, so the
                 # orchestrator legitimately lacks it.
-                role = next(r for _, r in render_agents.load_roles() if r["id"] == path.stem)
+                self.assertIn(path.stem, roles_by_name, "generated agent is not in its role family")
+                role = roles_by_name[path.stem]
                 host = render_agents.load_host("claude-code")
                 for name in render_agents.enforced_prohibitions(role, host):
                     self.assertIn("**%s**" % name, text)
@@ -785,18 +789,15 @@ class AdapterBuildTests(unittest.TestCase):
                 self.assertIn("in sync", result.stdout)
 
     def test_gemini_adapter_produces_expected_bundle_structure_and_roles(self):
-        """The Gemini adapter compiles all five canonical roles into Markdown agents
-        and projects them into a valid distribution bundle."""
+        """The Gemini adapter renders every catalog template into its bundle."""
         agents_dir = ROOT / "adapters/gemini/agents"
-        for role in (
-            "root-architect",
-            "orchestrator",
-            "impl-executor",
-            "spec-validator",
-            "quality-validator",
-        ):
+        expected_agents = {
+            entry["template_id"] + ".md"
+            for entry in render_agents.select_catalog("gemini")["templates"]
+        }
+        for filename in expected_agents:
             self.assertTrue(
-                (agents_dir / ("%s.md" % role)).is_file(), "missing generated agent: %s.md" % role
+                (agents_dir / filename).is_file(), "missing generated agent: %s" % filename
             )
 
         bundle = ROOT / "dist/gemini"
@@ -982,7 +983,10 @@ class CheckReturnTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
             fh.write(body)
             path = fh.name
-        return run(SCRIPTS / "check_return.py", ["--role", role, "--file", path] + (extra or []))
+        return run(
+            SCRIPTS / "check_return.py",
+            ["--role", role, "--file", path, "--legacy-file"] + (extra or []),
+        )
 
     def test_accepts_a_well_formed_report(self):
         self.assertEqual(self.check("implementer", valid_report()).returncode, 0)
@@ -1057,6 +1061,8 @@ class DispatchStateTests(unittest.TestCase):
         return str(path)
 
     def open_dispatch(self, brief=None, run_id="20260907-task-3"):
+        capability = self.workspace / "capability.json"
+        capability.write_text("{}", encoding="utf-8")
         return run(
             SCRIPTS / "dispatch_state.py",
             [
@@ -1067,41 +1073,48 @@ class DispatchStateTests(unittest.TestCase):
                 self.write_brief(brief or valid_brief()),
                 "--run-id",
                 run_id,
+                "--host",
+                "codex",
+                "--workspace-fingerprint",
+                "test-workspace",
+                "--controller-session-id",
+                "test-controller",
+                "--catalog-digest",
+                "test-catalog",
+                "--configuration-digest",
+                "test-configuration",
+                "--capability-evidence",
+                str(capability),
             ],
         )
 
-    def test_opens_and_reports_protected_paths(self):
+    def write_legacy_dispatch_fixture(self, brief=None, run_id="20260907-task-3", status="open"):
+        """Write a v1 record for read-only compatibility checks, not admission."""
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        dispatch = {
+            "schema_version": 1,
+            "run_id": run_id,
+            "status": status,
+            "opened_at": "2026-09-21T00:00:00+00:00",
+            "brief": brief or valid_brief(),
+        }
+        if status != "open":
+            dispatch.update(closed_at="2026-09-21T00:00:01+00:00", outcome="accepted")
+        path = state_dir / ("dispatch-%s.json" % run_id)
+        path.write_text(json.dumps(dispatch), encoding="utf-8")
+        return path
+
+    def test_direct_open_is_unsupported_without_authenticated_controller(self):
         result = self.open_dispatch()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("scripts/envelope.py", result.stdout)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("unsupported_boundary", result.stderr)
+        self.assertIn("authenticated controller", result.stderr)
 
-    def test_refuses_a_non_conformant_brief(self):
-        brief = valid_brief()
-        del brief["acceptance"]
-        result = self.open_dispatch(brief)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("not schema-conformant", result.stderr)
-
-    def test_refuses_escalation_without_a_recorded_reason(self):
-        result = self.open_dispatch(valid_brief(attempt=2))
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("escalation_reason", result.stderr)
-
-    def test_accepts_escalation_with_a_recorded_reason(self):
-        result = self.open_dispatch(
-            valid_brief(attempt=2, escalation_reason="attempt 1 left the tamper case unwritten")
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_refuses_a_second_concurrent_dispatch(self):
-        self.open_dispatch()
-        result = self.open_dispatch(run_id="20260907-task-4")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("One dependent task at a time", result.stderr)
-
-    def test_close_frees_the_slot(self):
-        self.open_dispatch()
-        closed = run(
+    def test_direct_close_is_unsupported_without_authenticated_controller(self):
+        """A legacy record must not let the compatibility CLI authorize a close."""
+        path = self.write_legacy_dispatch_fixture()
+        result = run(
             SCRIPTS / "dispatch_state.py",
             [
                 "close",
@@ -1113,29 +1126,10 @@ class DispatchStateTests(unittest.TestCase):
                 "accepted",
             ],
         )
-        self.assertEqual(closed.returncode, 0, closed.stderr)
-        self.assertEqual(self.open_dispatch(run_id="20260907-task-4").returncode, 0)
-
-    def test_blocked_outcome_marks_the_dispatch_aborted(self):
-        self.open_dispatch()
-        run(
-            SCRIPTS / "dispatch_state.py",
-            [
-                "close",
-                "--workspace",
-                str(self.workspace),
-                "--run-id",
-                "20260907-task-3",
-                "--outcome",
-                "blocked",
-            ],
-        )
-        state = json.loads(
-            (
-                self.workspace / ".root-architect" / "state" / "dispatch-20260907-task-3.json"
-            ).read_text()
-        )
-        self.assertEqual(state["status"], "aborted")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("unsupported_boundary", result.stderr)
+        self.assertIn("authenticated controller", result.stderr)
+        self.assertEqual(json.loads(path.read_text())["status"], "open")
 
     def test_active_reports_nothing_when_idle(self):
         result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
@@ -1145,8 +1139,8 @@ class DispatchStateTests(unittest.TestCase):
         result = run(SCRIPTS / "dispatch_state.py", ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 0)
 
-    def test_verify_exits_0_and_lists_a_healthy_dispatch(self):
-        self.open_dispatch()
+    def test_verify_reports_a_legacy_v1_dispatch(self):
+        self.write_legacy_dispatch_fixture()
         result = run(SCRIPTS / "dispatch_state.py", ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ok open 20260907-task-3", result.stdout)
@@ -1170,15 +1164,6 @@ class DispatchStateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("CORRUPT", result.stdout)
 
-    def test_open_fails_cleanly_on_corrupt_file(self):
-        state_dir = self.workspace / ".root-architect" / "state"
-        state_dir.mkdir(parents=True, exist_ok=True)
-        (state_dir / "dispatch-old.json").write_text("bad json", encoding="utf-8")
-        result = self.open_dispatch()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("state file corrupted", result.stderr)
-        self.assertNotIn("Traceback", result.stderr)
-
     def test_active_fails_cleanly_on_corrupt_file(self):
         state_dir = self.workspace / ".root-architect" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
@@ -1186,26 +1171,6 @@ class DispatchStateTests(unittest.TestCase):
         result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertIn("state file corrupted", result.stderr)
-        self.assertNotIn("Traceback", result.stderr)
-
-    def test_close_fails_cleanly_on_corrupt_file(self):
-        state_dir = self.workspace / ".root-architect" / "state"
-        state_dir.mkdir(parents=True, exist_ok=True)
-        (state_dir / "dispatch-task-3.json").write_text("bad json", encoding="utf-8")
-        result = run(
-            SCRIPTS / "dispatch_state.py",
-            [
-                "close",
-                "--workspace",
-                str(self.workspace),
-                "--run-id",
-                "task-3",
-                "--outcome",
-                "accepted",
-            ],
-        )
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("cannot read state file", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
     def test_active_skips_corrupt_closed_record_and_finds_open(self):
@@ -1218,7 +1183,7 @@ class DispatchStateTests(unittest.TestCase):
             encoding="utf-8",
         )
         # Write a healthy open record
-        self.open_dispatch(run_id="20260907-task-3")
+        self.write_legacy_dispatch_fixture(run_id="20260907-task-3")
         result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("20260907-task-3", result.stdout)
@@ -1228,7 +1193,7 @@ class DispatchStateTests(unittest.TestCase):
         state_dir = self.workspace / ".root-architect" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
         # Write a healthy open record first
-        self.open_dispatch(run_id="20260907-task-3")
+        self.write_legacy_dispatch_fixture(run_id="20260907-task-3")
         # Write an unparseable record that sorts after
         (state_dir / "dispatch-20260908-bad.json").write_text("corrupted data", encoding="utf-8")
         result = run(SCRIPTS / "dispatch_state.py", ["active", "--workspace", str(self.workspace)])
@@ -1240,7 +1205,7 @@ class DispatchStateTests(unittest.TestCase):
         """Missing schema file should raise DispatchStateError, not FileNotFoundError."""
         state_dir = self.workspace / ".root-architect" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
-        self.open_dispatch()
+        self.write_legacy_dispatch_fixture()
         # Temporarily hide the schema file
         schemas_dir = ROOT / "schemas"
         dispatch_schema = schemas_dir / "dispatch.schema.json"
@@ -1262,7 +1227,7 @@ class DispatchStateTests(unittest.TestCase):
         state_dir = self.workspace / ".root-architect" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
         # Write a healthy dispatch
-        self.open_dispatch(run_id="20260907-task-1")
+        self.write_legacy_dispatch_fixture(run_id="20260907-task-1")
         # Write a corrupt dispatch
         (state_dir / "dispatch-20260907-bad.json").write_text("not json", encoding="utf-8")
         result = run(SCRIPTS / "dispatch_state.py", ["verify", "--workspace", str(self.workspace)])
@@ -1274,7 +1239,7 @@ class DispatchStateTests(unittest.TestCase):
         """A schema file that exists but is not valid JSON must not traceback."""
         copy_root = make_corrupted_copy(self.tmp.name, "dispatch.schema.json", "not json at all")
         script = copy_root / "scripts" / "dispatch_state.py"
-        self.open_dispatch()
+        self.write_legacy_dispatch_fixture()
         result = run(script, ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
@@ -1285,7 +1250,7 @@ class DispatchStateTests(unittest.TestCase):
         """verify must still exit 1 and report CORRUPT, not traceback."""
         copy_root = make_corrupted_copy(self.tmp.name, "brief.schema.json", "{ this is not json")
         script = copy_root / "scripts" / "dispatch_state.py"
-        self.open_dispatch()
+        self.write_legacy_dispatch_fixture()
         result = run(script, ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
@@ -1299,7 +1264,7 @@ class DispatchStateTests(unittest.TestCase):
         """
         copy_root = make_corrupted_copy(self.tmp.name, "brief.schema.json", "{ not json")
         script = copy_root / "scripts" / "dispatch_state.py"
-        self.open_dispatch()
+        self.write_legacy_dispatch_fixture()
         result = run(script, ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
@@ -1310,7 +1275,7 @@ class DispatchStateTests(unittest.TestCase):
         """A missing sibling schema file must be named in the error."""
         copy_root = make_corrupted_copy(self.tmp.name, "brief.schema.json", None)
         script = copy_root / "scripts" / "dispatch_state.py"
-        self.open_dispatch()
+        self.write_legacy_dispatch_fixture()
         result = run(script, ["active", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
@@ -1320,7 +1285,7 @@ class DispatchStateTests(unittest.TestCase):
         """verify must still report CORRUPT and exit 1 for a corrupt sibling."""
         copy_root = make_corrupted_copy(self.tmp.name, "brief.schema.json", "{ not json")
         script = copy_root / "scripts" / "dispatch_state.py"
-        self.open_dispatch()
+        self.write_legacy_dispatch_fixture()
         result = run(script, ["verify", "--workspace", str(self.workspace)])
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
@@ -1401,21 +1366,19 @@ class RootWriteGuardTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
     def open_dispatch(self, brief=None):
-        path = self.workspace / "brief.json"
-        path.write_text(json.dumps(brief or valid_brief()), encoding="utf-8")
-        result = run(
-            SCRIPTS / "dispatch_state.py",
-            [
-                "open",
-                "--workspace",
-                str(self.workspace),
-                "--brief",
-                str(path),
-                "--run-id",
-                "20260907-task-3",
-            ],
+        """Seed a historic v1 record for guard read-path checks only."""
+        state_dir = self.workspace / ".root-architect" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        dispatch = {
+            "schema_version": 1,
+            "run_id": "20260907-task-3",
+            "status": "open",
+            "opened_at": "2026-09-21T00:00:00+00:00",
+            "brief": brief or valid_brief(),
+        }
+        (state_dir / "dispatch-20260907-task-3.json").write_text(
+            json.dumps(dispatch), encoding="utf-8"
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
 
     def call(self, tool="Edit", path="scripts/envelope.py", agent_type=None):
         payload = {"tool_name": tool, "cwd": str(self.workspace), "tool_input": {"file_path": path}}
@@ -2024,6 +1987,96 @@ class RootWriteGuardTests(unittest.TestCase):
             sink.close()
         self.assertEqual(result.returncode, 0)
 
+    def test_blocks_root_writing_to_protected_product_dirs_without_dispatch(self):
+        for path in ("lib/main.dart", "functions/index.py"):
+            with self.subTest(path=path):
+                result = self.call(path=path)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("protected product directory", result.stderr)
+
+    def test_allows_worker_writing_to_protected_product_dirs_when_in_write_paths(self):
+        self.open_dispatch(valid_brief(write_paths=["lib/main.dart"]))
+        result = self.call(path="lib/main.dart", agent_type="impl-executor")
+        self.assertEqual(result.returncode, 0)
+
+    def test_blocks_root_mutating_dispatch_state_via_bash(self):
+        for cmd in (
+            "python3 scripts/dispatch_state.py close --run-id x --outcome accepted",
+            "python3 -c '...' .root-architect/state/dispatch-x.json",
+            "rm -f .root-architect/state/dispatch-x.json",
+        ):
+            with self.subTest(cmd=cmd):
+                payload = {
+                    "tool_name": "Bash",
+                    "cwd": str(self.workspace),
+                    "tool_input": {"command": cmd},
+                }
+                result = self.raw_call(payload)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("mutate a dispatch state file", result.stderr)
+
+    def test_blocks_root_editing_dispatch_state_file_directly(self):
+        result = self.call(path=".root-architect/state/dispatch-x.json")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("state edit block", result.stderr)
+
+    def test_blocks_root_dispatching_workers_via_agent_tool(self):
+        for worker in ("impl-executor", "spec-validator", "quality-validator"):
+            with self.subTest(worker=worker):
+                payload = {
+                    "tool_name": "Agent",
+                    "cwd": str(self.workspace),
+                    "tool_input": {"agent_type": worker},
+                }
+                result = self.raw_call(payload)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("strictly restricted to dispatching 'orchestrator'", result.stderr)
+
+    def test_allows_root_dispatching_orchestrator_via_agent_tool(self):
+        payload = {
+            "tool_name": "Agent",
+            "cwd": str(self.workspace),
+            "tool_input": {"agent_type": "orchestrator"},
+        }
+        result = self.raw_call(payload)
+        self.assertEqual(result.returncode, 0)
+
+    def test_allows_orchestrator_dispatching_workers_via_agent_tool(self):
+        for worker in ("impl-executor", "spec-validator", "quality-validator"):
+            with self.subTest(worker=worker):
+                payload = {
+                    "tool_name": "Agent",
+                    "cwd": str(self.workspace),
+                    "agent_type": "orchestrator",
+                    "tool_input": {"agent_type": worker},
+                }
+                result = self.raw_call(payload)
+                self.assertEqual(result.returncode, 0)
+
+    def test_blocks_orchestrator_dispatching_orchestrator_via_agent_tool(self):
+        payload = {
+            "tool_name": "Agent",
+            "cwd": str(self.workspace),
+            "agent_type": "orchestrator",
+            "tool_input": {"agent_type": "orchestrator"},
+        }
+        result = self.raw_call(payload)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot dispatch another orchestrator", result.stderr)
+
+    def test_blocks_worker_dispatching_via_agent_tool(self):
+        for worker in ("impl-executor", "spec-validator", "quality-validator"):
+            with self.subTest(worker=worker):
+                payload = {
+                    "tool_name": "Agent",
+                    "cwd": str(self.workspace),
+                    "agent_type": worker,
+                    "tool_input": {"agent_type": "impl-executor"},
+                }
+                result = self.raw_call(payload)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("workers are not permitted to dispatch subagents", result.stderr)
+
 
 class WorkerGitGuardTests(unittest.TestCase):
     def call(self, agent_type, command=None, tool="Bash"):
@@ -2267,6 +2320,28 @@ class OrchestratorRoleTests(unittest.TestCase):
             with self.subTest(role=role_file):
                 self.assertIn(role["kind"], ("worker", "orchestrator", "root"))
 
+    def test_tiered_worker_names_are_accepted_by_catalog_and_gate(self):
+        catalog = render_agents.select_catalog("codex")
+        self.assertEqual(render_agents.validate_catalog(catalog), [])
+        names = {entry["template_id"] for entry in catalog["templates"]}
+        self.assertTrue(
+            {"impl-executor-cheap", "impl-executor-mid", "impl-executor-strong"} <= names
+        )
+        result = self.gate()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_malformed_worker_manifest_fails_validation_without_traceback(self):
+        tree = self.sandbox()
+        path = tree / "roles/impl-executor.json"
+        role = json.loads(path.read_text())
+        role["tools"] = []
+        path.write_text(json.dumps(role, indent=2))
+
+        result = self.gate(tree)
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("roles/impl-executor.json is not schema-conformant", result.stderr)
+
     def test_exactly_three_workers_and_one_orchestrator(self):
         kinds = [r["kind"] for r in self.roles().values()]
         self.assertEqual(kinds.count("worker"), 3)
@@ -2380,12 +2455,7 @@ class OrchestratorRoleTests(unittest.TestCase):
 
 
 class MailboxTests(unittest.TestCase):
-    """The four properties the mailbox exists to make true.
-
-    Each test here fails if the property is removed from mailbox.py. They are
-    written against behaviour, not implementation, so a rewrite that keeps the
-    guarantees keeps the tests.
-    """
+    """Historic file mailbox checks and the governed mutation boundary."""
 
     def setUp(self):
         self.workspace = Path(tempfile.mkdtemp())
@@ -2395,7 +2465,21 @@ class MailboxTests(unittest.TestCase):
         kwargs.setdefault("workspace", str(self.workspace))
         kwargs.setdefault("run_id", "r1")
         kwargs.setdefault("persisted_by", "orchestrator")
-        return mailbox.post(**kwargs)
+        return mailbox.legacy_post(**kwargs)
+
+    def test_governed_post_is_unsupported_without_authenticated_controller(self):
+        with self.assertRaises(mailbox.MailboxError) as caught:
+            mailbox.post(
+                workspace=str(self.workspace),
+                run_id="r1",
+                kind="task",
+                sender="orchestrator",
+                recipient="worker:implementer",
+                persisted_by="orchestrator",
+                body=b"do the thing\n",
+            )
+        self.assertIn("unsupported", str(caught.exception))
+        self.assertIn("authenticated controller", str(caught.exception))
 
     def dispatch_and_report(self, body=b"done\n"):
         self.post(
@@ -2496,11 +2580,15 @@ class MailboxTests(unittest.TestCase):
 
     def test_a_dispatched_task_with_no_answer_is_a_problem(self):
         self.post(
-            kind="task", sender="orchestrator", recipient="worker:implementer", body=b"do it\n"
+            kind="task",
+            sender="orchestrator",
+            recipient="worker:implementer",
+            body=b"do it\n",
+            envelope_id="task-1",
         )
         problems = mailbox.verify(str(self.workspace), "r1")
         self.assertTrue(
-            any("nothing came back" in p for p in problems),
+            any("controller missing result" in p for p in problems),
             "a vanished task verified clean: %s" % problems,
         )
 
@@ -2515,7 +2603,9 @@ class MailboxTests(unittest.TestCase):
             body=b"nothing returned\n",
             failure_mode="killed",
         )
-        self.assertEqual(mailbox.verify(str(self.workspace), "r1"), [])
+        problems = mailbox.verify(str(self.workspace), "r1")
+        self.assertFalse(any("nothing came back" in p for p in problems), problems)
+        self.assertTrue(any("not governed evidence" in p for p in problems), problems)
 
     def test_a_failure_envelope_must_name_its_mode(self):
         """'It failed' without saying how is the silence this replaces."""
@@ -2530,14 +2620,17 @@ class MailboxTests(unittest.TestCase):
 
     # --- diagnostics, not tracebacks --------------------------------------
 
-    def test_a_malformed_envelope_is_reported_not_raised_as_a_traceback(self):
+    def test_legacy_verify_reports_a_malformed_envelope_without_traceback(self):
+        directory = mailbox.mailbox_dir(str(self.workspace), "r1")
+        directory.mkdir(parents=True)
+        (directory / "0001-junk.md").write_text("not an envelope\n", encoding="utf-8")
         result = subprocess.run(
             [
                 sys.executable,
                 str(ROOT / "scripts/mailbox.py"),
                 "--workspace",
                 str(self.workspace),
-                "verify",
+                "legacy-verify",
                 "--run-id",
                 "r1",
             ],
@@ -2549,13 +2642,7 @@ class MailboxTests(unittest.TestCase):
 
 
 class JobQueueTests(unittest.TestCase):
-    """The deterministic half of the orchestrator, and its agreement with the
-    mailbox.
-
-    The queue and the mailbox are two records of the same run. Two records that
-    can drift are worth less than one unless something compares them, so the
-    cross-check gets as much attention here as the state machine.
-    """
+    """Read-only legacy queue checks and the governed mutation boundary."""
 
     RUN = "20260917-demo"
 
@@ -2563,24 +2650,8 @@ class JobQueueTests(unittest.TestCase):
         self.workspace = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.workspace, ignore_errors=True)
         self.ws = str(self.workspace)
-        self.preflight()
 
-    def preflight(self, run_id=None, passed=True):
-        """Put a startup-check record on file, because init now demands one.
-
-        Written directly rather than by running root_preflight: these tests are
-        about the queue, and the check's own behaviour is PreflightTests'
-        subject. What this does assert, by existing at all, is that a run
-        cannot be queued without it - remove this and every test below fails.
-        """
-        path = self.workspace / ".root-architect" / "preflight" / ("%s.json" % (run_id or self.RUN))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"run_id": run_id or self.RUN, "passed": passed, "refusals": []}) + "\n"
-        )
-        return path
-
-    def seed(self, tasks=None):
+    def document(self, tasks=None):
         tasks = tasks or [
             {"name": "build-parser", "worker": "worker:implementer", "brief": "briefs/parser.json"},
             {
@@ -2589,73 +2660,79 @@ class JobQueueTests(unittest.TestCase):
                 "brief": "briefs/parser.json",
             },
         ]
-        return job_queue.init(self.ws, self.RUN, tasks)
+        return {
+            "schema_version": 1,
+            "run_id": self.RUN,
+            "created_at": "2026-09-21T00:00:00+00:00",
+            "tasks": [{**task, "state": "pending"} for task in tasks],
+        }
 
-    def answer(self, name="build-parser"):
-        """Dispatch a task and post the envelope that answers it."""
-        job_queue.mark(self.ws, self.RUN, name, "dispatched")
-        path = mailbox.post(
-            self.ws,
-            self.RUN,
-            "report",
-            "worker:implementer",
-            "orchestrator",
-            "orchestrator",
-            b"done\n",
-        )
-        job_queue.mark(self.ws, self.RUN, name, "returned", path.name)
+    def write_legacy_queue(self, document=None):
+        path = job_queue.queue_path(self.ws, self.RUN)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document or self.document(), indent=2), encoding="utf-8")
         return path
+
+    def test_queue_initialization_is_unsupported_without_authenticated_controller(self):
+        with self.assertRaises(job_queue.JobQueueError) as caught:
+            job_queue.init(
+                self.ws,
+                self.RUN,
+                [
+                    {
+                        "name": "build-parser",
+                        "worker": "worker:implementer",
+                        "brief": "briefs/parser.json",
+                    }
+                ],
+            )
+        self.assertIn("unsupported_boundary", str(caught.exception))
+        self.assertIn("authenticated controller", str(caught.exception))
+
+    def test_queue_mark_is_unsupported_without_authenticated_controller(self):
+        with self.assertRaises(job_queue.JobQueueError) as caught:
+            job_queue.mark(self.ws, self.RUN, "build-parser", "dispatched")
+        self.assertIn("unsupported_boundary", str(caught.exception))
 
     # --- the state machine ------------------------------------------------
 
     def test_transitions_are_monotonic(self):
-        """A queue that can move backwards can revise its own history."""
-        self.seed()
-        self.answer()
-        for backwards in ("dispatched", "returned"):
-            with self.subTest(to=backwards):
-                with self.assertRaises(job_queue.JobQueueError) as caught:
-                    job_queue.mark(self.ws, self.RUN, "build-parser", backwards, "whatever.md")
-                self.assertIn("monotonic", str(caught.exception))
+        """An unchecked direct mark cannot change even a legacy queue."""
+        with self.assertRaises(job_queue.JobQueueError) as caught:
+            job_queue.mark(self.ws, self.RUN, "build-parser", "returned", "answer.md")
+        self.assertIn("unsupported_boundary", str(caught.exception))
 
     def test_an_answered_task_must_name_its_envelope(self):
-        self.seed()
-        job_queue.mark(self.ws, self.RUN, "build-parser", "dispatched")
-        for state in ("returned", "failed"):
-            with self.subTest(state=state):
-                with self.assertRaises(job_queue.JobQueueError) as caught:
-                    job_queue.mark(self.ws, self.RUN, "build-parser", state)
-                # mark()'s own wording, not just any mention of an envelope:
-                # validate() refuses this on save as well, so an assertion on
-                # the word alone passed whether or not mark() checked at all.
-                self.assertIn("needs the envelope that answered it", str(caught.exception))
+        document = self.document()
+        document["tasks"][0].update(state="returned")
+        with self.assertRaises(job_queue.JobQueueError) as caught:
+            job_queue.validate(document)
+        self.assertIn("names no envelope", str(caught.exception))
 
     def test_only_one_task_is_out_at_a_time(self):
         """dispatch_state reads one open dispatch; two would blind the guard."""
-        self.seed()
-        job_queue.mark(self.ws, self.RUN, "build-parser", "dispatched")
+        document = self.document()
+        document["tasks"][0]["state"] = "dispatched"
         with self.assertRaises(job_queue.JobQueueError) as caught:
-            job_queue.next_task(job_queue.load(self.ws, self.RUN))
+            job_queue.next_task(document)
         self.assertIn("still dispatched", str(caught.exception))
 
     def test_next_returns_tasks_in_order_then_nothing(self):
-        self.seed()
-        self.assertEqual(
-            job_queue.next_task(job_queue.load(self.ws, self.RUN))["name"], "build-parser"
-        )
-        self.answer("build-parser")
-        self.assertEqual(
-            job_queue.next_task(job_queue.load(self.ws, self.RUN))["name"], "check-plan"
-        )
-        self.answer("check-plan")
-        self.assertIsNone(job_queue.next_task(job_queue.load(self.ws, self.RUN)))
+        document = self.document()
+        self.assertEqual(job_queue.next_task(document)["name"], "build-parser")
+        document["tasks"][0]["state"] = "returned"
+        document["tasks"][0]["envelope"] = "0001-report-worker-implementer.md"
+        self.assertEqual(job_queue.next_task(document)["name"], "check-plan")
+        document["tasks"][1]["state"] = "failed"
+        document["tasks"][1]["envelope"] = "0002-failure-worker-spec-validator.md"
+        self.assertIsNone(job_queue.next_task(document))
 
     def test_a_run_is_queued_once(self):
         """Re-initialising would discard what the earlier queue recorded."""
-        self.seed()
+        self.write_legacy_queue()
         with self.assertRaises(job_queue.JobQueueError) as caught:
-            self.seed()
-        self.assertIn("already exists", str(caught.exception))
+            job_queue.init(self.ws, self.RUN, self.document()["tasks"])
+        self.assertIn("unsupported_boundary", str(caught.exception))
 
     def test_duplicate_task_names_are_refused(self):
         twice = [
@@ -2663,23 +2740,18 @@ class JobQueueTests(unittest.TestCase):
             {"name": "same", "worker": "worker:spec-validator", "brief": "b.json"},
         ]
         with self.assertRaises(job_queue.JobQueueError) as caught:
-            job_queue.init(self.ws, self.RUN, twice)
+            job_queue.validate(
+                {**self.document(twice), "tasks": [{**task, "state": "pending"} for task in twice]}
+            )
         self.assertIn("twice", str(caught.exception))
 
     # --- agreement with the mailbox ---------------------------------------
 
-    def test_a_sound_run_verifies(self):
-        self.seed()
-        self.answer()
-        self.assertEqual(job_queue.verify(self.ws, self.RUN), [])
-
     def test_an_envelope_the_mailbox_does_not_have_is_caught(self):
-        """The queue must not record work the record of the work lacks."""
-        self.seed()
-        job_queue.mark(self.ws, self.RUN, "build-parser", "dispatched")
-        job_queue.mark(
-            self.ws, self.RUN, "build-parser", "returned", "0002-report-worker-implementer.md"
-        )
+        """Read-only diagnostics still catch a legacy queue's missing envelope."""
+        document = self.document()
+        document["tasks"][0].update(state="returned", envelope="0002-report-worker-implementer.md")
+        self.write_legacy_queue(document)
 
         problems = job_queue.verify(self.ws, self.RUN)
         self.assertTrue(
@@ -2689,11 +2761,9 @@ class JobQueueTests(unittest.TestCase):
 
     def test_an_unanswered_task_pointing_at_an_answer_is_caught(self):
         """Bookkeeping that would read as progress."""
-        self.seed()
-        path = job_queue.queue_path(self.ws, self.RUN)
-        document = json.loads(path.read_text(encoding="utf-8"))
+        document = self.document()
         document["tasks"][0]["envelope"] = "0001-task-orchestrator.md"
-        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        self.write_legacy_queue(document)
 
         problems = job_queue.verify(self.ws, self.RUN)
         self.assertTrue(
@@ -3247,7 +3317,65 @@ class PreflightTests(unittest.TestCase):
         return str(path)
 
     def check(self, **kwargs):
-        return root_preflight.run(self.ws, self.RUN, self.observe(**kwargs))
+        return root_preflight.run(
+            self.ws, self.RUN, self.observe(**kwargs), host_name="claude-code"
+        )
+
+    def admission_context(self):
+        return {
+            "run_id": self.RUN,
+            "host_id": "claude-code",
+            "workspace": str(self.workspace.resolve()),
+            "workspace_fingerprint": "workspace-fingerprint",
+            "controller_session_id": "controller-session",
+            "catalog_digest": "catalog-digest",
+            "configuration_fingerprint": "configuration-fingerprint",
+            "capability_evidence": {
+                "source": "selected_transport",
+                "transport_id": "claude-session",
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "capabilities": {
+                    "delegation_available": True,
+                    "controller_selection_enforced": True,
+                    "registered_agents": True,
+                    "hook_registration_enforced": True,
+                },
+            },
+        }
+
+    def test_missing_host_is_refused_without_inventing_a_refusal_record(self):
+        observed = self.observe()
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            root_preflight.run(self.ws, self.RUN, observed)
+        self.assertIn("explicit host", str(caught.exception))
+        self.assertFalse(root_preflight.record_path(self.ws, self.RUN).exists())
+
+    def test_status_can_read_legacy_record_without_a_host_but_never_passes_it(self):
+        path = root_preflight.record_path(self.ws, self.RUN)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"passed": True, "run_id": self.RUN}))
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "root_preflight.py"),
+                "--workspace",
+                self.ws,
+                "--run-id",
+                self.RUN,
+                "--status",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("legacy", result.stderr.lower())
+        self.assertIn("cannot authorize mutation", result.stderr.lower())
+
+    def test_refused_observation_is_not_persisted_as_an_admission_record(self):
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            self.check(agent_types=("ungranted",))
+        self.assertIn("not admitted", str(caught.exception))
+        self.assertFalse(root_preflight.record_path(self.ws, self.RUN).exists())
 
     # --- what it is derived from -------------------------------------------
 
@@ -3258,13 +3386,17 @@ class PreflightTests(unittest.TestCase):
 
     # --- the two questions D11 names ---------------------------------------
 
-    def test_a_sound_session_passes_and_is_recorded(self):
-        record = self.check()
-        self.assertTrue(record["passed"])
-        on_disk = json.loads(root_preflight.record_path(self.ws, self.RUN).read_text())
-        self.assertEqual(
-            on_disk["observed"]["agent_types"], ["root-architect-execution:orchestrator"]
-        )
+    def test_a_sound_observation_cannot_authorize_direct_admission(self):
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            root_preflight.run(
+                self.ws,
+                self.RUN,
+                self.observe(),
+                host_name="claude-code",
+                admission=self.admission_context(),
+            )
+        self.assertIn("unsupported_boundary", str(caught.exception))
+        self.assertFalse(root_preflight.record_path(self.ws, self.RUN).exists())
 
     def test_a_missing_dispatch_tool_is_refused(self):
         """The depth cap, or a launch that was never a main-thread agent."""
@@ -3289,26 +3421,26 @@ class PreflightTests(unittest.TestCase):
             self.check(tools=("Agent", "define_subagent"))
         self.assertIn("root holds 'define_subagent'", str(caught.exception))
 
-    def test_gemini_auto_interrogation_preflight(self):
-        """Gemini runtime auto-interrogation verifies boundary and hooks."""
-        record = root_preflight.run(self.ws, self.RUN, host_name="gemini", auto=True)
-        self.assertTrue(record["passed"])
-        self.assertEqual(record["observed"]["agent_types"], ["orchestrator"])
-        self.assertNotIn("define_subagent", record["observed"]["tools"])
+    def test_gemini_files_cannot_stand_in_for_runtime_evidence(self):
+        """Files cannot prove that the selected transport loaded its guards."""
+        with self.assertRaises(root_preflight.PreflightError) as caught:
+            root_preflight.run(self.ws, self.RUN, host_name="gemini", auto=True)
+        self.assertIn("auto-interrogation is unsupported", str(caught.exception))
+        self.assertFalse(root_preflight.record_path(self.ws, self.RUN).exists())
 
-    def test_a_refusal_is_recorded_too(self):
-        """A refused run and an unchecked one must not look the same after."""
+    def test_a_refusal_is_not_written_as_an_admission_record(self):
+        """A diagnostic refusal never creates a record that can gate writes."""
         with self.assertRaises(root_preflight.PreflightError):
             self.check(agent_types=("anything",))
-        record = json.loads(root_preflight.record_path(self.ws, self.RUN).read_text())
-        self.assertFalse(record["passed"])
-        self.assertTrue(record["refusals"])
+        self.assertFalse(root_preflight.record_path(self.ws, self.RUN).exists())
 
     # --- fails closed -------------------------------------------------------
 
     def test_an_absent_observation_is_a_failure_not_a_pass(self):
         with self.assertRaises(root_preflight.PreflightError) as caught:
-            root_preflight.run(self.ws, self.RUN, str(self.workspace / "nope.json"))
+            root_preflight.run(
+                self.ws, self.RUN, str(self.workspace / "nope.json"), host_name="claude-code"
+            )
         self.assertIn("silence is not a pass", str(caught.exception))
 
     def test_a_malformed_observation_is_refused(self):
@@ -3320,7 +3452,12 @@ class PreflightTests(unittest.TestCase):
         ):
             with self.subTest(raw=raw):
                 with self.assertRaises(root_preflight.PreflightError):
-                    root_preflight.run(self.ws, self.RUN, self.observe(raw=raw))
+                    root_preflight.run(
+                        self.ws,
+                        self.RUN,
+                        self.observe(raw=raw),
+                        host_name="claude-code",
+                    )
 
     # --- and what it gates --------------------------------------------------
 
@@ -3329,16 +3466,17 @@ class PreflightTests(unittest.TestCase):
         tasks = [{"name": "t", "worker": "worker:implementer", "brief": "briefs/t.json"}]
         with self.assertRaises(job_queue.JobQueueError) as caught:
             job_queue.init(self.ws, self.RUN, tasks)
-        self.assertIn("no startup check on record", str(caught.exception))
+        self.assertIn("unsupported_boundary", str(caught.exception))
 
         with self.assertRaises(root_preflight.PreflightError):
             self.check(tools=("Read",))
-        with self.assertRaises(job_queue.JobQueueError) as caught:
+        with self.assertRaises(job_queue.JobQueueError):
             job_queue.init(self.ws, self.RUN, tasks)
-        self.assertIn("on record as FAILED", str(caught.exception))
 
-        self.check()
-        self.assertTrue(job_queue.init(self.ws, self.RUN, tasks).exists())
+        with self.assertRaises(root_preflight.PreflightError):
+            self.check()
+        with self.assertRaises(job_queue.JobQueueError):
+            job_queue.init(self.ws, self.RUN, tasks)
 
     def test_an_unreadable_record_proves_nothing(self):
         path = root_preflight.record_path(self.ws, self.RUN)
@@ -3380,8 +3518,9 @@ class PreflightTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-        roles = sorted(r["id"] for _f, r in render_agents.load_roles())
-        self.assertEqual(sorted(p.stem for p in target.glob("*.toml")), roles)
+        catalog = json.loads((target / "template-catalog.json").read_text(encoding="utf-8"))
+        expected_templates = sorted(entry["template_id"] for entry in catalog["templates"])
+        self.assertEqual(sorted(p.stem for p in target.glob("*.toml")), expected_templates)
 
         # The plugin root reaches the generated file, because a worker that
         # cannot find its role prose has an agent file and no role.
@@ -3453,7 +3592,7 @@ class PreflightTests(unittest.TestCase):
         # bundle is byte-gated against a fresh build. An install is a copy
         # anyway, so this is also the truer shape of the test.
         bundle = self.workspace / "installed"
-        shutil.copytree(ROOT / "dist/claude-code", bundle)
+        build_adapter.build("claude-code", bundle)
         for script, expected in (
             ("validate_roles.py", "capability gate passed"),
             ("validate_interfaces.py", "interfaces sound"),
@@ -3476,15 +3615,14 @@ class PreflightTests(unittest.TestCase):
                 self.ws,
                 "--run-id",
                 self.RUN,
-                "--observed",
-                self.observe(),
+                "--status",
             ],
             capture_output=True,
             text=True,
             cwd=str(bundle),
         )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("the boundary holds", result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("no startup check on record", result.stderr)
 
     def test_the_cli_refuses_to_invent_an_observation(self):
         result = subprocess.run(
@@ -3495,9 +3633,21 @@ class PreflightTests(unittest.TestCase):
                 self.ws,
                 "--run-id",
                 self.RUN,
+                "--host",
+                "claude-code",
+                "--controller-session-id",
+                "session",
+                "--catalog-digest",
+                "catalog",
+                "--configuration-digest",
+                "configuration",
+                "--workspace-fingerprint",
+                "workspace",
+                "--capability-evidence",
+                str(self.workspace / "evidence.json"),
             ],
             capture_output=True,
             text=True,
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("it cannot make one", result.stderr)
+        self.assertIn("--observed is required", result.stderr)

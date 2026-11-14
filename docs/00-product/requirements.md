@@ -2,7 +2,7 @@
 title: Product Requirements
 status: active
 owner: root-architect-execution maintainers
-last_reviewed: 2026-09-17
+last_reviewed: 2026-09-20
 ---
 
 # Product Requirements
@@ -16,6 +16,12 @@ last_reviewed: 2026-09-17
 - Roles SHALL be declared in `roles/*.json` and generated for hosts rather than duplicated manually.
 - Host capabilities SHALL be declared and provenance-checked.
 - Briefs, implementer reports, validator verdicts, role definitions, host definitions, and dispatch state SHALL conform to their schemas/contracts.
+- A governed run SHALL be admitted by one authoritative controller record bound to its run, host, controller session, installed catalog, and effective configuration. A filename, role name, or truthy field is not admission evidence.
+- Required dispatch capability, worker delegation/tool denial, and protected controller evidence storage SHALL be proven for the selected host before that host is described as runtime-ready. Missing proof blocks runtime acceptance.
+- Each worker result SHALL be captured and bound to exactly one run, task, and immutable attempt before validation. A report for the same worker role cannot answer a different task.
+- Governed message routes SHALL be root to orchestrator, orchestrator to worker, worker to orchestrator, and orchestrator to root. A worker SHALL NOT route a report or question directly to root.
+- A queue transition SHALL refuse a second active task, rather than merely detecting it during later verification.
+- Readable mailbox and state exports SHALL NOT authorize dispatches or results; the controller-owned record is authoritative.
 - A malformed worker return SHALL receive at most one format-correction retry before stopping.
 - A `DONE` implementer report SHALL contain observed RED and GREEN test evidence.
 - Root SHALL NOT advance past a failed gate.
@@ -46,3 +52,4 @@ last_reviewed: 2026-09-17
 - Root fallback implementation when a required role is unavailable.
 - Automatic destructive Git/release operations without explicit owner approval.
 - Claims of host-enforced isolation when the host cannot expose the necessary identity/capability.
+- Enforcement claims for an ordinary root chat outside the governed launcher. It remains outside this runtime boundary.

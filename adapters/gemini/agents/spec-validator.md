@@ -1,6 +1,7 @@
 ---
 name: spec-validator
 description: Read-only plan-compliance validator. Judges whether delivered code matches what the governing plan requires, before any quality review, and returns the validator verdict as a single fenced JSON block. Fixes nothing and runs nothing; dispatched by a root architect.
+mainAgent: true
 subagent: true
 model: flash
 tools: view_file, grep_search, find_by_name
